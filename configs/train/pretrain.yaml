@@ -1,0 +1,45 @@
+# Stage 1: pretraining on DadaGP (once per model size). Model-size specific values come
+# from configs/model/<size>.yaml -> train.pretrain and override the ones below.
+seed: 1234
+deterministic: false        # true = repeatable GPU math (slower), for debugging
+device: auto
+precision: auto             # auto | bf16 | fp16 | fp32
+
+data:
+  stores:
+    - {path: data/processed/dadagp, split: train}
+  val_store: data/processed/dadagp
+  val_infill: 256           # fixed validation examples (saved in the run folder)
+  val_song: 128
+  task_mix: {song: 0.7, infill: 0.3}
+  # Loss on prefix/suffix tokens of infill examples. 1.0 = "FIM for free" (Bavarian et al.
+  # 2022): infill examples then also teach normal continuation, so pretraining is ~3x
+  # cheaper per useful token. Fine-tuning keeps 0 (README: only the middle is trained).
+  context_loss_weight: 1.0
+  bars_per_example: auto    # ~one example per context window of every song per epoch
+  augment:
+    gap_length: {4: 0.35, 8: 0.35, other: 0.30}
+    segment_length_prob: 0.3
+    border_shift: {prob: 0.2, max_bars: 2}
+    extra_gap_placeholder: 0.2
+    song_gap_placeholder: 0.1
+    guitar_swap: 0.5
+    guitar_drop: 0.2
+  section_dropout: 0.3
+
+train:
+  max_steps: 6000
+  warmup_steps: 500
+  lr: 3.0e-4
+  min_lr_ratio: 0.1
+  weight_decay: 0.1
+  grad_clip: 1.0
+  tokens_per_step: 131072   # loss-weighted target tokens per optimizer step
+  micro_batch_tokens: 32768
+  eval_every: 500
+  save_every: 500
+  log_every: 20
+  workers: 8
+  buffer_size: 256
+  compile: false            # torch.compile: Linux only (Triton); try it once training runs
+  tensorboard: false

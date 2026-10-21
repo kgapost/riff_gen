@@ -1,0 +1,16 @@
+# Playability profile (README §7.7, D41). "Playable" depends on the player: edit these.
+profile: live
+tuning: drop_a7
+max_span:                # frets between lowest and highest fretted note of a chord / hand position
+  below_5: 4
+  below_12: 5
+  above_12: 6
+max_fingers: 4
+max_notes_per_second: 16         # picking hand
+max_jump_frets_per_16th: 7       # position jump that needs at least a 16th note of time
+max_string_skip_speed: 12        # notes/s above which skipping >= 2 strings is flagged
+allow_tapping: true
+natural_harmonic_frets: [2.4, 3, 3.2, 4, 5, 7, 9, 12, 16, 19, 24]
+score:
+  error: 15
+  warning: 3

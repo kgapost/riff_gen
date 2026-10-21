@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "riffgen"
+version = "0.1.0"
+description = "Fill gaps in Guitar Pro songs with 7-string Drop A guitar riffs."
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "tqdm>=4.60",
+    # D26: the DadaGP encoder only works with PyGuitarPro 0.6. It installs and
+    # runs fine on Python 3.10-3.12, so one environment is enough.
+    "PyGuitarPro==0.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+logging = ["tensorboard>=2.12"]
+
+[tool.setuptools.packages.find]
+include = ["riffgen*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

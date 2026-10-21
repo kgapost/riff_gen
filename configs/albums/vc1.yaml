@@ -1,0 +1,40 @@
+# Album config: VC1
+inherit: train/finetune.yaml
+album_id: vc1
+title: "VC1"
+model: big                      # baseline | big | huge (which pretrained base to fine-tune)
+# base_model: runs/pretrain_big/best.pt
+tuning: drop_a7
+min_gap_bars: 4
+
+data:
+  root: data/own/VC1
+  own: own
+  others: [favourites, influences]
+  holdout: []                   # D32: 1-2 of your own songs, e.g. [own/song_07.gp5]. Never make copies of them.
+  songs: songs                  # unfinished songs with gaps
+
+filters:
+  simple_riff_action: context   # keep | context | drop
+  force_keep: []                # - {file: own/song_03.gp5, bars: 49-56}
+  force_drop: []
+
+dadagp_mix:                     # §3.9: similar DadaGP songs mixed into fine-tuning
+  enabled: true
+  share: 0.15
+  method: features              # features | embeddings
+  k_nearest: 5
+  top_riffs_per_song: 3
+  max_songs: 1000
+  max_per_artist: 20
+  prefer_tunings: [drop_a7, dropdbl_a7, a_std7, b_std7]
+  always_include_artists: [Gojira, Opeth, Meshuggah, Periphery]
+  exclude_artists: []
+
+generation:
+  candidates: 32
+  keep: 10
+  temperature: 1.0
+  top_p: 0.95
+  min_complexity: 0.25
+  max_neighbour_similarity: 0.95

@@ -1,0 +1,12 @@
+# Plagiarism check (README §7.6, D38-D40). Starting values.
+ngram: 8                    # note events per n-gram
+onset_quantum: 40           # ticks (1/24 quarter) for comparing rhythms
+idiom:
+  min_families: 3           # D39: a piece is a common idiom only if it is in >= 3 song families
+  min_share: 0.01           #      ... and in >= 1 % of the families in the index
+red:
+  run_bars: 2               # an L1/L2 match run of >= 2 bars
+  coverage: 0.5             # or >= 50 % of the candidate's notes inside matches from one family
+yellow:
+  run_bars: 1
+  coverage: 0.25

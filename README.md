@@ -16,6 +16,7 @@ a Guitar Pro file in 7-string Drop A.
 7. [Filling gaps (generation)](#7-filling-gaps-generation)
 8. [ToDo](#8-todo)
 9. [References](#9-references)
+10. [Code](#10-code)
 
 ---
 
@@ -66,10 +67,8 @@ The last column links to the section with the details.
 | D13 | **Guitar tracks only** (up to 3). Bass, drums, vocals and keys are removed, including DadaGP's `leads` and `pads` classes. | Guitar output only, and shorter sequences fit more bars into the model's memory. In DadaGP, `leads` holds piano, vocal melodies and rare instruments, not lead guitars. | [§3.6](#36-preprocessing-pipeline) |
 | D14 | **Repeats are unrolled** (written out in full) before tokenizing. | The model sees the music as it is played. The DadaGP authors also report that their repeat token was hard for models to learn and caused too many repeated bars. | [§5.3](#53-structure-sections-and-repeats) |
 | D15 | In training songs, runs of **4 or more empty guitar bars** are replaced by a **`gap:N` placeholder** token. The model reads it but never writes it. | The model must not learn "play nothing for 4 bars". The same token marks the other, unfilled gaps of a song at generation time (D35). | [§5.4](#54-gaps) |
-| D16 | **Solos are removed** from training. Repeating lead melodies are kept. | We want riffs. Repetition is what separates a melody from a solo. | [§3.7.1](#371-solo-filter) |
-| D17 | **Very simple riffs** are kept as **context only**: never trained to be written, never used as a hidden gap. "Simple" means simple pitch AND simple rhythm. | The model still needs them as context. Requiring both keeps one-note polyrhythm riffs and tremolo riffs. | [§3.7.2](#372-simple-riff-filter) |
-| D18 | Every filter writes an **audit report** plus GP5 snippets of what it removed, and the album YAML can override it per song and bar. | Filters make mistakes, and we must be able to hear them. | [§3.7.3](#373-filter-audit-and-manual-overrides) |
-| D19 | The solo filter **cannot rely on a DadaGP "lead guitar" class**: lead guitars are stored as normal guitars (`distorted0–2`, `clean0–1`), and track names are not in the tokens. Track names are used only when we have the original GP file. | Answer to the old question "does DadaGP put lead guitars in their own class?" — no. | [§3.7.1](#371-solo-filter) |
+| D17 | **Very simple riffs** are kept as **context only**: never trained to be written, never used as a hidden gap. "Simple" means simple pitch AND simple rhythm. | The model still needs them as context. Requiring both keeps one-note polyrhythm riffs and tremolo riffs. | [§3.7.1](#371-simple-riff-filter) |
+| D18 | Every filter writes an **audit report** plus GP5 snippets of what it removed, and the album YAML can override it per song and bar. | Filters make mistakes, and we must be able to hear them. | [§3.7.2](#372-filter-audit-and-manual-overrides) |
 | D20 | We accept DadaGP as **token files**: if the download has no original GP files, we decode the tokens to GP5 with the DadaGP decoder and run the same pipeline. | The DadaGP paper lists the token files, the encoder/decoder and statistics as the distributed content. Both cases work. | [§3.2](#32-where-the-data-comes-from) |
 
 ### 2.3 Tokens
@@ -77,11 +76,11 @@ The last column links to the section with the details.
 | ID | Decision | Why | More |
 |---|---|---|---|
 | D21 | Tokenization **follows the DadaGP format**. Our extra tokens are **added on top**, never replacing DadaGP tokens. | Same format as the DadaGP dataset (the musician's requirement). | [§4](#4-tokens-how-a-tab-becomes-text-for-the-model) |
-| D22 | **7-string guitars are supported** by the DadaGP encoder. We still start with a round-trip test (one own Drop A song → tokens → GP5) and listen to it. | The paper says 7-string guitars are supported, but it does not say how a dropped 7th string is written. | [§4.1](#41-the-dadagp-token-format) |
+| D22 | **7-string guitars are supported** by the DadaGP encoder. We still start with a round-trip test (one own Drop A song → tokens → GP5) and listen to it. | The paper says 7-string guitars are supported, but it does not say how a dropped 7th string is written. **Tested: the encoder rejects 7-string Drop A** (A E A D G B E is not one of its four tuning shapes). Solved by D49; the round trip is exact. | [§4.1](#41-the-dadagp-token-format) |
 | D23 | We add **`ts:` time-signature tokens**. | DadaGP does not store time signatures; it infers them from the `wait` tokens, which cannot tell 3/4 from 6/8. | [§4.2](#42-our-extra-tokens) |
 | D24 | Tempo: DadaGP has a `tempo:` header token and `bfx:tempo_change` tokens. We keep both in training and **block tempo changes** inside generated bars. | The tempo of the gap is forced (D33). | [§7.2](#72-forced-rules) |
 | D25 | **Section markers** ("Verse", "Chorus"…) are read by us with PyGuitarPro and become `section:` tokens. | The DadaGP token format does not include markers. | [§5.3](#53-structure-sections-and-repeats) |
-| D26 | **PyGuitarPro is pinned to version 0.6** for the whole project. If 0.6 does not install on our Python version, the DadaGP encoder runs in its own virtual environment. | The DadaGP code only works with PyGuitarPro 0.6. | [§3.6](#36-preprocessing-pipeline) |
+| D26 | **PyGuitarPro is pinned to version 0.6** for the whole project. If 0.6 does not install on our Python version, the DadaGP encoder runs in its own virtual environment. | The DadaGP code only works with PyGuitarPro 0.6. **Tested: 0.6 works on Python 3.12, so one environment is enough.** | [§3.6](#36-preprocessing-pipeline) |
 | D27 | **Context window: 4096 tokens.** When the song is longer, we keep the bars closest to the gap on both sides. We measure real tokens per bar on our data and revisit this if fewer than ~32 bars fit. | DadaGP averages ~4,400 tokens per song with all instruments. Guitars only is shorter; dense two-guitar metal is roughly 50–100 tokens per bar, so about 40–80 bars should fit. These are estimates. | [§5.1](#51-measure) |
 
 ### 2.4 Training
@@ -90,7 +89,7 @@ The last column links to the section with the details.
 |---|---|---|---|
 | D28 | Training uses **two kinds of examples**: song pieces (`task:song`) and fill-in-the-middle gaps (`task:infill`). | Song pieces teach general music; infill examples teach our one job. | [§4.3](#43-the-two-kinds-of-training-examples) |
 | D29 | Hidden gaps in training (4–16 bars) are placed on **riff and section borders**, found by our riff detection. | Real gaps in the musician's songs sit where a riff is missing, not in the middle of one. | [§5.2](#52-riff) |
-| D30 | Model: a small **decoder-only Transformer** (GPT style, ~85M parameters, 4096 tokens) with PyTorch + Hugging Face `transformers`. | Well known and well documented. Fits easily on both GPUs. | [§6.2](#62-model) |
+| D30 | Model: a small **decoder-only Transformer** (GPT style, ~85M parameters, 4096 tokens) with PyTorch + Hugging Face `transformers`. | Well known and well documented. Fits easily on both GPUs. This is now the **baseline**; two larger variants exist (D58), all in plain PyTorch (D59). | [§6.2](#62-model) |
 | D31 | **Hardware:** training on the RTX 4090 (bf16), testing and generating on the GTX 1650 (the model needs well under 1 GB). | Both are enough for a model of this size. | [§6.3](#63-starting-training-settings) |
 | D32 | **1–2 own songs per album are held out** (never trained on, never copied). Fine-tuning stops early when the loss on them stops improving. | It shows whether the model learned the style or only memorized. | [§6.4](#64-how-we-know-training-works) |
 
@@ -124,6 +123,25 @@ The last column links to the section with the details.
 | D46 | **One seed controls every random operation**, through generators derived from the seed and a fixed key per decision. The seed is saved with every run and every candidate. | Runs can be repeated, comparisons are fair, and any candidate can be regenerated. | [§3.8.3](#383-on-the-fly-with-one-seed) |
 | D47 | **Similar songs from DadaGP** are mixed into each album's fine-tuning (starting value: 15 % of examples), chosen by riff-level style similarity to the album set. | Real music close to the album's style is worth more than any transform, and it also keeps the model from forgetting general guitar music. | [§3.9](#39-similar-songs-from-dadagp) |
 | D48 | The DadaGP songs selected for an album are **added to that album's plagiarism index**, and songs that also appear in the album folders or the held-out set are removed from the pool. | The model trains on them, so it can copy from them. Duplicates would leak held-out songs into training. | [§3.9](#39-similar-songs-from-dadagp) |
+
+### 2.8 Implementation decisions (added with the code)
+
+| ID | Decision | Why | More |
+|---|---|---|---|
+| D49 | **Tuning bypass** for our own files: non-guitar tracks are removed first, guitar tracks are labelled standard 6/7-string *for the encoder only*, the real tuning goes into our `tuning:` token. | The DadaGP encoder rejects Drop A (D22). It writes string + fret, not pitch, so the tab is unchanged. | [docs/TRAINING.md](docs/TRAINING.md) |
+| D50 | **Physical frets everywhere.** DadaGP writes drop strings pitch-normalised (open low D = `s6:f-2`); we convert back to the fret you actually play, using the tuning. | Tabs are shapes (D10, D12). Playability and plagiarism L1 need real frets. Lossless. | [docs/TRAINING.md](docs/TRAINING.md) |
+| D51 | **Canonical token order**: guitars in slot order inside an onset, notes by string, rests only where they end a note, tempo changes as global events (they survive removing the drum track). | One way to write the same music: less for the model to learn, and the generator can enforce it. | `riffgen/dataset/song.py` |
+| D52 | Header: one `track:` + `tuning:` pair per guitar (instead of one `tuning:` token), then `tempo:`. DadaGP's `artist:` and `downtune:` are not given to the model. | Songs can mix 6- and 7-string guitars; the model sees which guitars exist even if one is silent around the gap. The artist would invite copying. | `riffgen/dataset/serialize.py` |
+| D53 | Our own **GP5 writer** instead of the DadaGP decoder; candidates are **spliced into your original file**. | The DadaGP decoder rounds durations (bars change length) and drops tremolo picking. Splicing keeps bass, drums and everything else exactly as written. | `riffgen/gp/writer.py` |
+| D54 | Pretraining also trains the prefix/suffix tokens of infill examples (`context_loss_weight: 1.0`); fine-tuning keeps middle-only loss (§4.3). | "FIM for free" (Bavarian et al.): ~3× more learning per token in pretraining. | `configs/train/*.yaml` |
+| D55 | A segment with the filter action `drop` (`force_drop`, or `simple_riff_action: drop`) becomes a `gap:N` placeholder in context instead of splitting the song. | Same effect as D15/§3.7 (no false transitions), simpler. | `riffgen/dataset/sampler.py` |
+| D56 | The forced rules (D33) also enforce the canonical order of D51, one note per string, effects only after their note, ties only onto a sounding note. | The model writes the format it was trained on; impossible tabs cannot appear. | `riffgen/generate/constraints.py` |
+| D57 | Every candidate is sampled with its own generator (Gumbel-max), and all candidates share the prompt's attention cache. | D46 "regenerate candidate 7" holds with any batch size; 32 candidates fit on the GTX 1650. | `riffgen/generate/decode.py` |
+| D58 | **Three model variants**: baseline (87M, tokens only), big (261M, musical embeddings + musical-time positions, 8192 tokens), huge (384M, big + song memory with planning heads). | Data, not GPU, is the limit; the variants add musical knowledge rather than width. | [docs/MODELS.md](docs/MODELS.md) |
+| D59 | Models in **plain PyTorch**, not Hugging Face `transformers`. | Custom embeddings, multi-axis positions, the song memory and constrained decoding with a shared cache do not fit the stock models. | `riffgen/model/` |
+| D60 | Album fine-tuning of big/huge uses **LoRA** (+ trained embeddings) by default; baseline fine-tunes fully. | 200 tabs cannot safely move 260-380M weights; LoRA regularises and an album network is a few MB. | `configs/model/*.yaml` |
+| D61 | Album data lives in `data/own/<Album>/{own,favourites,influences,songs}`; one config per album in `configs/albums/` (`python -m riffgen.tools.new_album`). | Matches the folders you created. | §10 |
+| D62 | The simple-riff filter judges all guitars of a segment together. | A simple lead line over a rich riff is not a "simple riff" (§3.7). | `riffgen/analysis/filters.py` |
 
 ---
 
@@ -213,23 +231,25 @@ Signs that a song has too many copies:
 Example album config:
 
 ```yaml
-# configs/albums/album_01.yaml
+# configs/albums/album_01.yaml  (python -m riffgen.tools.new_album writes one per folder, D61)
+inherit: train/finetune.yaml
 album_id: album_01
 title: "Working title of album 1"
-base_model: runs/base/best.pt
+model: big                        # which pretrained base: baseline | big | huge (D58)
+# base_model: runs/pretrain_big/best.pt
 
 data:
-  own: data/raw/albums/album_01/own              # my songs (used for SELF-QUOTE)
-  others:
-    - data/raw/albums/album_01/favourites        # songs I envy (+ their __vN copies)
-    - data/raw/albums/album_01/influences        # similar bands
-  holdout:                                       # never trained on, never copied
+  root: data/own/Album 1
+  own: own                        # my songs (used for SELF-QUOTE)
+  others: [favourites, influences]  # songs I envy (+ their __vN copies), similar bands
+  holdout:                        # never trained on, never copied
     - own/song_07.gp5
+  songs: songs                    # unfinished songs with gaps (generation only)
 
 finetune:
-  learning_rate: 5.0e-5
+  # method: lora                  # default per model size (D60)
   max_epochs: 10
-  early_stopping_patience: 2   # stop when held-out loss stops improving
+  early_stopping_patience: 2      # epochs; stop when held-out loss stops improving
 ```
 
 ### 3.5 Tuning: 7-string Drop A
@@ -266,7 +286,7 @@ GP3/4/5 file (or DadaGP tokens → decoded to GP5 first, D20)
   │ 4. unroll repeats and alternate endings                              (D14)
   │ 5. read section markers ("Verse", "Chorus"...) → section labels       (D25)
   │ 6. replace runs of ≥4 empty guitar bars with a gap:N placeholder      (D15)
-  │ 7. detect riffs and sections; run the solo and simple-riff filters   (§3.7)
+  │ 7. detect riffs and sections; run the simple-riff filter             (§3.7)
   │ 8. save as a "normalized" GP5 file  ← you can open and check it in GP7!
   │ 9. DadaGP encoder → tokens
   │10. add our extra tokens (tuning, time signature, sections, gaps)     (§4.2)
@@ -288,20 +308,16 @@ Songs are **skipped** (and listed in a log file) if:
 - they are in an album set and a guitar track is not in 7-string Drop A,
 - the file cannot be read.
 
-### 3.7 Training filters: solos and very simple riffs
+### 3.7 Training filter: very simple riffs
 
-We want the model to write **riffs**. Two kinds of material don't help with that:
-- **guitar solos** (a different job, and they take up a lot of tokens), and
-- **very simple riffs** (for example 4 bars of straight chugs on the open A), which
-  are not worth generating.
+We want the model to write **riffs**. Very simple riffs (for example 4 bars of straight
+chugs on the open A) don't help with that: they are not worth generating.
 
-The filters judge **segments**: the riffs and sections found in §5.2 and §5.3, with
-at least 2 bars each. They never judge single bars (one bar is too short), and they
-never throw away whole songs. They also work **per track**. When a lead guitar plays
-a solo over a riff, only the solo track is removed in those bars, and the rhythm
-guitar underneath stays.
+The filter judges **segments**: the riffs and sections found in §5.2 and §5.3, with
+at least 2 bars each. It never judges single bars (one bar is too short), and it
+never throws away whole songs.
 
-Each filter chooses one of three actions (set in `configs/filters.yaml`):
+The filter chooses one of three actions (set in the album YAML, `filters:`):
 
 | Action | What happens to the segment |
 |---|---|
@@ -309,28 +325,7 @@ Each filter chooses one of three actions (set in `configs/filters.yaml`):
 | `context` | The model **reads** it but is never trained to **write** it (loss masking). It is never used as a hidden gap. |
 | `drop` | Removed. The song is split at that point. The bars before and after are **not** joined together, because that would teach the model transitions that never existed. |
 
-#### 3.7.1 Solo filter
-
-Several signals are combined into a **solo score** from 0 to 1:
-
-| Signal | Looks like a solo when… |
-|---|---|
-| Section marker | The marker says "Solo", "Guitar solo", "Lead"… (strong signal) |
-| Track name | The name contains "solo" or "lead". Only available when we have the original GP file (D19). |
-| Register | Most notes are high: strings 1–3, above about fret 12 |
-| Texture | Mostly single notes, few chords |
-| Techniques | Many bends, vibrato, legato, tapping, whammy |
-| Density and variety | Many notes per beat, many different pitches |
-| **Repetition** | **Little or no repetition** (the most important signal) |
-
-- Rule: a segment with solo score **≥ 0.7** (starting value) → **`drop`**.
-- Neighbouring bars are smoothed, so a solo is removed in one piece and not chopped
-  into holes.
-- **Exception: repeating lead melodies are kept.** Twin-guitar harmony lines (Opeth,
-  Arcturus), melodic leads (Anathema, Pink Floyd) and similar lines **repeat** like a
-  riff. A solo usually does not.
-
-#### 3.7.2 Simple-riff filter
+#### 3.7.1 Simple-riff filter
 
 For each segment we measure:
 
@@ -362,9 +357,9 @@ a rhythm idea, so it is not simple.
 - The same simplicity score is used at **generation time** to remove candidates that
   are too simple (`--min-complexity`, §7.4).
 
-#### 3.7.3 Filter audit and manual overrides
+#### 3.7.2 Filter audit and manual overrides
 
-Filters make mistakes, so we must be able to **listen** to what they did (D18):
+The filter makes mistakes, so we must be able to **listen** to what it did (D18):
 
 - `reports/filters_album_01.csv`: every filtered segment, its scores, the action and the reason.
 - `reports/audit_album_01/`: a short GP5 file for each filtered segment. Open them in
@@ -374,11 +369,10 @@ Filters make mistakes, so we must be able to **listen** to what they did (D18):
 
 ```yaml
 filters:
-  solo_threshold: 0.7
   simple_riff_action: context      # keep | context | drop
   force_keep:
     - file: own/song_03.gp5
-      bars: 49-56                  # looks like a solo, but it is the main theme
+      bars: 49-56                  # looks simple, but it is the main theme
   force_drop:
     - file: influences/song_x.gp5
       bars: 1-16
@@ -410,7 +404,7 @@ it would memorize them fast. Instead, the sampler picks **new gaps in every epoc
 | How many gaps per song | About one infill example per 16 bars of the song, per epoch. Every version of a song family counts as a song. |
 | Gap length | 4–16 bars: 4 bars 35 %, 8 bars 35 %, any other length 30 %. 4 and 8 are the most common riff lengths. |
 | Gap start | 80 %: exactly on a riff or section border (D29). 20 %: shifted 1–2 bars from a border, because borders found automatically can be off by a bar, and your own gaps may not sit exactly on one. |
-| What the gap may cover | Only `keep` segments. A gap never covers a `context` or `drop` part (§3.7), so the model never learns to write solos or very simple riffs. |
+| What the gap may cover | Only `keep` segments. A gap never covers a `context` or `drop` part (§3.7), so the model never learns to write very simple riffs. |
 | Context | The bars before and after the gap, closest first, until 4096 tokens are full (D27). |
 | Extra placeholders | In 20 % of examples, another part of the context becomes `gap:N` (§4.3). |
 
@@ -555,7 +549,7 @@ We remove:
 
 | Option | What it uses | When |
 |---|---|---|
-| **A. Musical features** | Numbers computed from the tokens: tempo, share of odd time signatures, notes per beat, palm-mute share, chords vs single notes, techniques used, which strings are used (how much on the low strings), interval and rhythm (note-start) patterns, simplicity score (§3.7.2). | Available from day one. Easy to read and debug. |
+| **A. Musical features** | Numbers computed from the tokens: tempo, share of odd time signatures, notes per beat, palm-mute share, chords vs single notes, techniques used, which strings are used (how much on the low strings), interval and rhythm (note-start) patterns, simplicity score (§3.7.1). | Available from day one. Easy to read and debug. |
 | **B. Model embeddings** | The average internal state of the base model over the riff's tokens. | Only after pretraining. Captures more, but is harder to explain. |
 
 We start with option A. When the base model exists, we try option B and compare the
@@ -883,7 +877,7 @@ A song that is 50–90 % complete usually has more than one gap. **Decision D35:
 ```
 generate N candidates for the gap (e.g. 32)
   → remove: candidates that only repeat the riff before or after the gap (similarity ≥ 0.95)
-  → remove: candidates that are too simple (simplicity score, §3.7.2, --min-complexity)
+  → remove: candidates that are too simple (simplicity score, §3.7.1, --min-complexity)
   → remove/flag: plagiarism check (§7.6)
   → remove/flag: playability check, with automatic re-fingering (§7.7)
   → rank: by model confidence + playability score
@@ -1071,7 +1065,6 @@ Tips:
    guitar tracks. Keep the right tempo and time signature in the song. A marker such
    as "Bridge" at the gap helps.
 8. If possible, **add section markers** to your own songs (Verse, Chorus, Bridge…).
-   A "Solo" marker also helps the solo filter.
 9. **Set your playability profile** in `configs/playability.yaml` (hand span,
    fastest picking you are comfortable with).
 10. After editing a generated idea in Guitar Pro 7, **export it to GP5 again** before
@@ -1090,3 +1083,57 @@ Tips:
 - **PyGuitarPro:** Python library to read/write GP3/GP4/GP5 files.
 - **Fill-in-the-middle:** Bavarian et al., *"Efficient Training of Language Models to
   Fill in the Middle"*, 2022 (the idea behind our infill examples).
+- **LoRA:** Hu et al., *"LoRA: Low-Rank Adaptation of Large Language Models"*, 2021.
+- **Repeated data:** Muennighoff et al., *"Scaling Data-Constrained Language Models"*, 2023
+  (why a few passes over DadaGP are fine, and why much bigger models would memorize).
+
+---
+
+## 10. Code
+
+The three model variants are explained in [docs/MODELS.md](docs/MODELS.md); the step-by-step
+runbook and the list of problems we will run into are in [docs/TRAINING.md](docs/TRAINING.md);
+how the model can look at the whole song is researched in [docs/LONG_CONTEXT.md](docs/LONG_CONTEXT.md).
+
+```bash
+pip install -e ".[dev]"                       # after installing PyTorch for your GPU, see docs/TRAINING.md
+python -m riffgen.tools.smoke                 # whole pipeline on synthetic data (also: --huge)
+
+# Stage 1 (once per model size)
+python -m riffgen.dataset.inspect --src data/dadaGP
+python -m riffgen.dataset.preprocess dadagp --workers 12
+python -m riffgen.train.pretrain --model baseline          # big | huge; --resume after a crash
+
+# Collecting tabs: a shortlist of free Guitar Pro tabs rated above 4.4 from Ultimate Guitar artist pages,
+# then filing what you downloaded by hand (the site's robots.txt disallows automated downloads)
+python -m riffgen.tools.ultimate_guitar list https://www.ultimate-guitar.com/artist/meshuggah_3907
+python -m riffgen.tools.ultimate_guitar sort --downloads ~/Downloads --dest "data/own/Compound Structure/influences"
+
+# Stage 2 (per album)
+python -m riffgen.tools.new_album --all                    # configs/albums/<album>.yaml per folder in data/own
+python -m riffgen.dataset.preprocess album configs/albums/compound_structure.yaml
+python -m riffgen.dataset.preview --album compound_structure --n 20
+python -m riffgen.train.finetune configs/albums/compound_structure.yaml --model big
+
+# Ideas
+python -m riffgen.generate --album compound_structure --song unfinished.gp5 --gap 33-40 --section bridge
+python -m riffgen.check --album compound_structure --folder outputs/compound_structure/<folder> --fix --mark
+python -m riffgen.tools.rate outputs/compound_structure/<folder>
+python -m riffgen.eval --checkpoint runs/compound_structure/big/best.pt \
+    --store data/processed/albums/compound_structure --split holdout --listen reports/listen
+```
+
+| Folder | Content |
+|---|---|
+| `riffgen/tokens/` | vocabulary (DadaGP tokens first, D21), tunings, section names |
+| `riffgen/gp/` | Guitar Pro reading (tuning bypass, D49), DadaGP encoder bridge, GP5 writer (D53) |
+| `riffgen/dataset/` | parsing, unrolling, preprocessing, store, sampler (FIM, augmentation), features, loader, similar songs, preview |
+| `riffgen/analysis/` | riff/section detection, simple-riff filter |
+| `riffgen/model/` | the three models, LoRA |
+| `riffgen/train/` | trainer, pretraining, fine-tuning, checkpoints |
+| `riffgen/generate/` | forced rules (constrained decoding), sampling, the generate command |
+| `riffgen/check/` | plagiarism and playability checks, folder check |
+| `riffgen/eval/` | evaluation and blind listening sets |
+| `third_party/dadagp/` | the DadaGP encoder, MIT licence, Dadabots (vendored, unchanged) |
+| `configs/` | model sizes, training stages, albums, filters, playability, plagiarism |
+| `tests/` | `python -m pytest -q` |

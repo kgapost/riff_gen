@@ -1,0 +1,31 @@
+{
+  "_comment": "Section marker text -> section label (D25). Patterns are matched in order, case-insensitive, as substrings after removing digits and punctuation. Anything unmatched becomes 'other'.",
+  "labels": ["intro", "verse", "chorus", "bridge", "solo", "breakdown", "interlude", "outro", "other"],
+  "patterns": [
+    ["prechorus", "other"],
+    ["pre chorus", "other"],
+    ["pre-chorus", "other"],
+    ["chorus", "chorus"],
+    ["refrain", "chorus"],
+    ["hook", "chorus"],
+    ["verse", "verse"],
+    ["strophe", "verse"],
+    ["couplet", "verse"],
+    ["bridge", "bridge"],
+    ["middle 8", "bridge"],
+    ["middle eight", "bridge"],
+    ["guitar solo", "solo"],
+    ["solo", "solo"],
+    ["lead", "solo"],
+    ["breakdown", "breakdown"],
+    ["break down", "breakdown"],
+    ["intro", "intro"],
+    ["outro", "outro"],
+    ["coda", "outro"],
+    ["ending", "outro"],
+    ["end", "outro"],
+    ["interlude", "interlude"],
+    ["instrumental", "interlude"],
+    ["interval", "interlude"]
+  ]
+}

@@ -1,0 +1,33 @@
+# BIG -- "music-aware tab model"
+# Same decoder idea, 3x wider/deeper, plus two things that tell the model what the tokens
+# MEAN musically instead of leaving it to guess:
+#  * musical embeddings per token: pitch (from the real tuning), pitch class, octave, fret,
+#    string-from-bottom, guitar, position in the bar, beat strength, bar relative to the gap;
+#  * multi-axis rotary positions: token index + musical time + position in the bar.
+# 8192 tokens (~130-160 bars): most songs fit completely.
+# ~260M parameters. Train on the 4090; generate on the 4090 (or slowly on the 1650 in fp16).
+name: big
+n_layer: 20
+d_model: 1024
+n_head: 16
+d_ff: 2816
+max_seq_len: 8192
+dropout: 0.1
+attn_dropout: 0.0
+tie_embeddings: true
+rope_axes: {token: 0.5, time: 0.25, phase: 0.25}
+time_period: [1.5, 4096.0]     # 16th notes: from a dotted 32nd to 256 bars of 4/4
+phase_period: [1.5, 64.0]      # 16th notes inside one bar
+music_features: true
+hierarchical: false
+grad_checkpointing: true
+
+train:
+  pretrain:
+    lr: 2.0e-4
+    max_steps: 6000
+    micro_batch_tokens: 24576
+  finetune:
+    method: lora               # 200 tabs are not enough to move 260M weights safely
+    lr: 2.0e-4
+    micro_batch_tokens: 16384

@@ -1,0 +1,44 @@
+# HUGE -- "structure-aware model" (hierarchical, with a song memory)
+# The big decoder (24 layers) plus a view of the WHOLE song, whatever its length:
+#  * bar encoder: every bar of the song -> one vector (small bidirectional transformer);
+#  * song encoder: a bidirectional transformer over those bar vectors -> it can see form,
+#    repeats ("this riff comes 4 times"), sections, and where the gap must lead;
+#  * the decoder reads the song memory through gated cross-attention every 4 layers and gets
+#    a "plan" vector for the bar it is writing;
+#  * the bars it must write are MASKED in the memory, and auxiliary heads must predict their
+#    pitch classes (harmony) and onset grid (rhythm) from the context = a plan for the gap;
+#  * a contrastive loss makes repeated bars (riffs) look alike to the bar encoder, and a
+#    section head predicts verse/chorus/... for every bar (form).
+# ~380M parameters. Data (~70M guitar tokens) is the limit, not the GPU: the extra capacity
+# goes into structure, not width.
+name: huge
+n_layer: 24
+d_model: 1024
+n_head: 16
+d_ff: 2816
+max_seq_len: 8192
+dropout: 0.1
+attn_dropout: 0.0
+tie_embeddings: true
+rope_axes: {token: 0.5, time: 0.25, phase: 0.25}
+time_period: [1.5, 4096.0]
+phase_period: [1.5, 64.0]
+music_features: true
+hierarchical: true
+cross_attn_every: 4
+bar_encoder: {n_layer: 3, d_model: 384, n_head: 6, d_ff: 1024}
+song_encoder: {n_layer: 6, d_model: 768, n_head: 12, d_ff: 2048}
+max_bar_tokens: 96
+max_song_bars: 256
+aux_weights: {pc: 0.1, onset: 0.1, section: 0.05, contrastive: 0.05}
+grad_checkpointing: true
+
+train:
+  pretrain:
+    lr: 1.5e-4
+    max_steps: 6000
+    micro_batch_tokens: 16384
+  finetune:
+    method: lora
+    lr: 2.0e-4
+    micro_batch_tokens: 12288

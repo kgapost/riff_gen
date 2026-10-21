@@ -1,0 +1,16 @@
+# Smoke tests only (CPU, seconds). Same code path as "big".
+name: test_tiny
+n_layer: 2
+d_model: 64
+n_head: 4
+d_ff: 128
+max_seq_len: 1024
+dropout: 0.0
+rope_axes: {token: 0.5, time: 0.25, phase: 0.25}
+music_features: true
+hierarchical: false
+grad_checkpointing: false
+train:
+  pretrain: {lr: 1.0e-3, max_steps: 6, micro_batch_tokens: 4096, tokens_per_step: 2048, eval_every: 3,
+             save_every: 3, log_every: 1, workers: 0, warmup_steps: 2}
+  finetune: {method: full, lr: 1.0e-3, micro_batch_tokens: 4096, tokens_per_step: 1024, workers: 0, log_every: 1}

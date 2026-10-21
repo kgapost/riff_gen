@@ -1,0 +1,22 @@
+# Smoke tests only (CPU, seconds). Same code path as "huge".
+name: test_tiny_huge
+n_layer: 4
+d_model: 64
+n_head: 4
+d_ff: 128
+max_seq_len: 1024
+dropout: 0.0
+rope_axes: {token: 0.5, time: 0.25, phase: 0.25}
+music_features: true
+hierarchical: true
+cross_attn_every: 2
+bar_encoder: {n_layer: 1, d_model: 32, n_head: 2, d_ff: 64}
+song_encoder: {n_layer: 1, d_model: 48, n_head: 4, d_ff: 96}
+max_bar_tokens: 64
+max_song_bars: 128
+aux_weights: {pc: 0.1, onset: 0.1, section: 0.05, contrastive: 0.05}
+grad_checkpointing: true
+train:
+  pretrain: {lr: 1.0e-3, max_steps: 6, micro_batch_tokens: 4096, tokens_per_step: 2048, eval_every: 3,
+             save_every: 3, log_every: 1, workers: 0, warmup_steps: 2}
+  finetune: {method: lora, lr: 1.0e-3, micro_batch_tokens: 4096, tokens_per_step: 1024, workers: 0, log_every: 1}

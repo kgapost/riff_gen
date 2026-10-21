@@ -1,0 +1,42 @@
+# Stage 2: album fine-tuning defaults. Album configs inherit this file; model-size specific
+# values come from configs/model/<size>.yaml -> train.finetune.
+seed: 1234
+deterministic: false
+device: auto
+precision: auto
+
+data:
+  task_mix: {song: 0.3, infill: 0.7}
+  context_loss_weight: 0.0       # README §4.3: only the hidden bars are trained
+  bars_per_example: 16           # D43: ~1 example per 16 bars of every song, per epoch
+  augment:
+    gap_length: {4: 0.35, 8: 0.35, other: 0.30}
+    segment_length_prob: 0.3
+    border_shift: {prob: 0.2, max_bars: 2}
+    extra_gap_placeholder: 0.2
+    song_gap_placeholder: 0.1
+    guitar_swap: 0.5
+    guitar_drop: 0.2
+  section_dropout: 0.3
+  holdout_gap_lengths: [4, 8]    # fixed validation gaps on the held-out songs (D32, D43)
+  dadagp_val: 64                 # small DadaGP validation set: watches for forgetting
+
+finetune:
+  # method: full | lora. Default per model size (configs/model: baseline full, big/huge lora);
+  # set it in the album config to override.
+  lora: {rank: 16, alpha: 32, dropout: 0.05, train_embeddings: true}
+  max_epochs: 10
+  evals_per_epoch: 2
+  early_stopping_patience: 2     # in epochs (D32)
+
+train:
+  warmup_steps: 50
+  min_lr_ratio: 0.1
+  weight_decay: 0.05
+  grad_clip: 1.0
+  tokens_per_step: 32768
+  log_every: 10
+  workers: 4
+  buffer_size: 128
+  compile: false
+  tensorboard: false

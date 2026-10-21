@@ -1,0 +1,27 @@
+# BASELINE -- "tab language model" (README D30)
+# A plain GPT over DadaGP-format tokens. Token-index RoPE only; the model has to work out
+# pitch, meter and position in the bar by itself from the token sequence.
+# ~85M parameters, 4096 tokens (~60-100 bars of guitars). Runs fine on the GTX 1650.
+name: baseline
+n_layer: 12
+d_model: 768
+n_head: 12
+d_ff: 2048
+max_seq_len: 4096
+dropout: 0.1
+attn_dropout: 0.0
+tie_embeddings: true
+rope_axes: {token: 1.0}
+music_features: false
+hierarchical: false
+grad_checkpointing: false
+
+train:
+  pretrain:
+    lr: 3.0e-4
+    max_steps: 8000            # ~15 passes over DadaGP guitars (~70M tokens) at 131k tokens/step
+    micro_batch_tokens: 32768  # RTX 4090, bf16
+  finetune:
+    method: full
+    lr: 5.0e-5
+    micro_batch_tokens: 32768
