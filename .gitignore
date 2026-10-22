@@ -13,7 +13,10 @@ data/processed/
 # training and generation outputs
 runs/
 outputs/
-reports/
+reports/*
+# ...except the Ultimate Guitar shortlists (small); the cache of saved pages stays out
+!reports/ug_shortlist/
+reports/ug_shortlist/cache/
 
 # third-party clone, no licence: reference only (docs/UGDownloader_summary.md)
 UGDownloader/
