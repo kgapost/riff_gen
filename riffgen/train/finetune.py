@@ -23,7 +23,7 @@ import yaml
 
 from riffgen import REPO_DIR
 from riffgen.dataset.loader import SourceSpec, StreamConfig, TrainStream, build_fixed_examples, epoch_plan, _Sources
-from riffgen.dataset.sampler import ExampleBuilder, holdout_specs
+from riffgen.dataset.sampler import ExampleBuilder, holdout_specs, make_far_specs
 from riffgen.dataset.store import Store
 from riffgen.model.lora import apply_lora
 from riffgen.train import checkpoint as ckpt_mod
@@ -122,6 +122,12 @@ def main(argv=None) -> None:
     if specs:
         val_sets["val"] = build_fixed_examples(specs, store, vocab, sc)
         log.info("held-out: %d songs, %d fixed gaps", len(hold_views), len(val_sets["val"]))
+        n_far = int(acfg.data.get("val_far", 0) or 0)
+        far_path = run_dir / "val_far_specs.json"
+        if n_far and not far_path.is_file():
+            far_path.write_text(json.dumps(make_far_specs(hold_views, builder, seed, n_far), indent=1))
+        if far_path.is_file() and json.loads(far_path.read_text()):
+            val_sets["val_far"] = build_fixed_examples(json.loads(far_path.read_text()), store, vocab, sc)
     else:
         log.warning("no held-out songs (data.holdout): no early stopping, best.pt = last step")
     dv = int(acfg.data.get("dadagp_val", 0) or 0)

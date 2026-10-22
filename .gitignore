@@ -14,3 +14,6 @@ data/processed/
 runs/
 outputs/
 reports/
+
+# third-party clone, no licence: reference only (docs/UGDownloader_summary.md)
+UGDownloader/

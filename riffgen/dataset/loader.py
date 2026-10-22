@@ -193,7 +193,7 @@ def collate_song(songs: list[dict], T: int) -> dict:
     out = {k: torch.zeros((B, NB, Lb), dtype=torch.long) for k in SONG_INT_KEYS}
     out["bar_len"] = torch.zeros((B, NB), dtype=torch.long)
     out["mask_kind"] = torch.full((B, NB), 3, dtype=torch.long)      # 3 = padding
-    for k in ("rel", "tempo", "ts_num", "ts_den"):
+    for k in ("rel", "tempo", "ts_num", "ts_den", "phrase"):
         out[k] = torch.zeros((B, NB), dtype=torch.long)
     out["bar_lo"] = torch.tensor([int(s.get("bar_lo", 0)) for s in songs], dtype=torch.long)
     out["section"] = torch.full((B, NB), -1, dtype=torch.long)
@@ -208,7 +208,7 @@ def collate_song(songs: list[dict], T: int) -> dict:
             out[k][i, :nb] = torch.from_numpy(s[k].astype(np.int64))
         out["bar_len"][i, :nb] = torch.from_numpy(s["bar_len"].astype(np.int64))
         out["mask_kind"][i, :nb] = torch.from_numpy(s["mask_kind"].astype(np.int64))
-        for k in ("rel", "tempo", "ts_num", "ts_den", "section"):
+        for k in ("rel", "tempo", "ts_num", "ts_den", "section", "phrase"):
             out[k][i, :nb] = torch.from_numpy(s[k].astype(np.int64))
         out["aux_pc"][i, :nb] = torch.from_numpy(s["aux_pc"])
         out["aux_onset"][i, :nb] = torch.from_numpy(s["aux_onset"])

@@ -66,6 +66,7 @@ def _step_features(feats: list[Featurizer], toks: list[int], device) -> dict:
         "beat": torch.tensor([r[6] for r in rows], device=device)[:, None],
         "seg": torch.tensor([r[7] for r in rows], device=device)[:, None],
         "pos": torch.tensor([r[8] for r in rows], device=device)[:, None],
+        "phrase": torch.tensor([r[11] for r in rows], device=device)[:, None],
         "bar_rel": torch.tensor([min(max(r[0] - ref, -BAR_REL_MAX), BAR_REL_MAX - 1) + BAR_REL_MAX for r in rows],
                                 device=device)[:, None].clamp(0, N_BAR_REL - 1),
         "time": torch.tensor([r[9] for r in rows], dtype=torch.float32, device=device)[:, None],

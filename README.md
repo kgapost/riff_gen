@@ -81,7 +81,7 @@ The last column links to the section with the details.
 | D24 | Tempo: DadaGP has a `tempo:` header token and `bfx:tempo_change` tokens. We keep both in training and **block tempo changes** inside generated bars. | The tempo of the gap is forced (D33). | [§7.2](#72-forced-rules) |
 | D25 | **Section markers** ("Verse", "Chorus"…) are read by us with PyGuitarPro and become `section:` tokens. | The DadaGP token format does not include markers. | [§5.3](#53-structure-sections-and-repeats) |
 | D26 | **PyGuitarPro is pinned to version 0.6** for the whole project. If 0.6 does not install on our Python version, the DadaGP encoder runs in its own virtual environment. | The DadaGP code only works with PyGuitarPro 0.6. **Tested: 0.6 works on Python 3.12, so one environment is enough.** | [§3.6](#36-preprocessing-pipeline) |
-| D27 | **Context window: 4096 tokens.** When the song is longer, we keep the bars closest to the gap on both sides. We measure real tokens per bar on our data and revisit this if fewer than ~32 bars fit. | DadaGP averages ~4,400 tokens per song with all instruments. Guitars only is shorter; dense two-guitar metal is roughly 50–100 tokens per bar, so about 40–80 bars should fit. These are estimates. | [§5.1](#51-measure) |
+| D27 | **Context window: 4096 tokens.** When the song is longer, we keep the bars closest to the gap on both sides (changed by D63). We measure real tokens per bar on our data and revisit this if fewer than ~32 bars fit. | DadaGP averages ~4,400 tokens per song with all instruments. Guitars only is shorter; dense two-guitar metal is roughly 50–100 tokens per bar, so about 40–80 bars should fit. These are estimates. | [§5.1](#51-measure) |
 
 ### 2.4 Training
 
@@ -142,6 +142,10 @@ The last column links to the section with the details.
 | D60 | Album fine-tuning of big/huge uses **LoRA** (+ trained embeddings) by default; baseline fine-tunes fully. | 200 tabs cannot safely move 260-380M weights; LoRA regularises and an album network is a few MB. | `configs/model/*.yaml` |
 | D61 | Album data lives in `data/own/<Album>/{own,favourites,influences,songs}`; one config per album in `configs/albums/` (`python -m riffgen.tools.new_album`). | Matches the folders you created. | §10 |
 | D62 | The simple-riff filter judges all guitars of a segment together. | A simple lead line over a rich riff is not a "simple riff" (§3.7). | `riffgen/analysis/filters.py` |
+| D63 | **Structure-aware context.** When a song is longer than the window, it is filled ~50 % with the bars closest to the gap, ~35 % with *related* bars, and the rest is skipped as `gap:N`. Related = for the 4 bars before/after the gap, the bars that repeat them elsewhere *and what followed there*, the first and last 8 bars (intro, outro), other occurrences of the gap's section. The hidden bars are never shown. Songs that fit are shown completely. | The surprises you want (an intro riff that returns, a verse/chorus cycle) are far from the gap, so "closest bars first" cuts them away first. On long synthetic songs the far repeat is in the window 88 % of the time instead of 7 %, at the same token count. | [docs/LONG_CONTEXT.md](docs/LONG_CONTEXT.md) |
+| D64 | **Long-range training tasks.** 25 % of infill gaps are placed on bars that repeat a bar ≥ 32 bars away ("reprise"), 5 % in the last 16 bars where the intro returns ("bookend"), and in 10 % of examples the closest 4-8 bars on both sides are hidden. All with the same seed rules as the other augmentation (D45, D46). | Almost every next token is predictable from the last bars; without these tasks the model learns to ignore distant context. | `configs/train/*.yaml` |
+| D65 | New token feature **bar k of its phrase** (1-16, from the riff/section borders; the gap edges count as borders, so training and generation compute the same value). Huge's song memory also gets it. | Metal and prog phrases follow 4/8-bar patterns; the model should not have to count bars. | `riffgen/dataset/serialize.py` |
+| D66 | Huge's song memory holds up to **512 bars** with up to **192 tokens per bar** (was 256 and 96). | Long prog songs are seen completely, dense 3-guitar bars are not cut. | `configs/model/huge.yaml` |
 
 ---
 
@@ -405,7 +409,7 @@ it would memorize them fast. Instead, the sampler picks **new gaps in every epoc
 | Gap length | 4–16 bars: 4 bars 35 %, 8 bars 35 %, any other length 30 %. 4 and 8 are the most common riff lengths. |
 | Gap start | 80 %: exactly on a riff or section border (D29). 20 %: shifted 1–2 bars from a border, because borders found automatically can be off by a bar, and your own gaps may not sit exactly on one. |
 | What the gap may cover | Only `keep` segments. A gap never covers a `context` or `drop` part (§3.7), so the model never learns to write very simple riffs. |
-| Context | The bars before and after the gap, closest first, until 4096 tokens are full (D27). |
+| Context | If the song fits into the window: all of it. Otherwise ~50 % the closest bars, ~35 % related bars (D63), the rest skipped as `gap:N`. |
 | Extra placeholders | In 20 % of examples, another part of the context becomes `gap:N` (§4.3). |
 
 Example: a 120-bar song gives about 7 infill examples per epoch. Over 10 epochs that
@@ -668,7 +672,7 @@ IDs. They are removed again before the DadaGP decoder turns tokens back into GP5
 | `section:verse`, `section:chorus`, `section:bridge`, `section:solo`, `section:breakdown`, `section:intro`, `section:outro`, `section:interlude`, `section:other` | Section label read from the tab's markers | Start of a section |
 | `task:song`, `task:infill` | Which kind of example this is | Header |
 | `bars:N` | How many bars to write (the length of the gap) | Header (infill) |
-| `gap:N` | N bars here are unknown: another gap, or a part without guitars. Read only, never written. (D15) | Instead of the empty bars |
+| `gap:N` | N bars here are unknown: another gap, a part without guitars, or bars skipped because the song is longer than the window (D63). Read only, never written. (D15) | Instead of those bars |
 | `<fim_prefix>`, `<fim_suffix>`, `<fim_middle>` | Before the gap / after the gap / the gap itself | Infill |
 
 The section names come from a mapping file, `configs/sections.json`. For example,
@@ -759,8 +763,9 @@ at riff borders, and it learns from them what a riff is.
   **after** the gap (`<fim_suffix>`), then writes exactly as many bars as the gap
   has (`bars:N`). So the riff leads somewhere: the model knows where the music has
   to arrive.
-- When the song does not fit into 4096 tokens, we keep the bars **closest to the
-  gap** on both sides (D27).
+- When the song does not fit into the window, we keep the bars closest to the gap and
+  the bars **related** to it (repeats of the bars next to the gap and what followed them,
+  intro, outro, same section); everything else becomes `gap:N` (D63).
 - Training hides 4–16 bars of real songs, so the model practises exactly this job.
 
 ---

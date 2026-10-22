@@ -17,6 +17,20 @@ Augmentation (all in here, nothing is written to disk, D45):
 * an extra ``gap:N`` placeholder in 20 % of infill examples (§4.3);
 * section-token dropout, so the model also works without ``--section``.
 
+Long-range context (docs/LONG_CONTEXT.md, stage 1). When a song does not fit into the window, the
+context is not "the closest bars until full" any more but three parts:
+
+* ~50 % local: the closest bars on both sides of the gap;
+* ~35 % related: for the bars next to the gap, the bars that *repeat* them elsewhere in the song and
+  what followed there ("last time this riff was followed by ..."), the intro and the outro, and
+  other occurrences of the gap's section;
+* the rest of the song is skipped and marked as ``gap:N``; the musical-time positions keep the true
+  distances, so the model knows how far away every chunk is.
+
+Training makes the model use it: some gaps are chosen where the answer repeats a bar >= 32 bars away
+("reprise"), some where the intro returns at the end ("bookend"), and in 10 % of the examples the
+closest 4-8 bars on both sides are hidden, so distant bars are the only help.
+
 For the hierarchical (huge) model each example also carries the *whole song* as one entry
 per bar ("song memory"), with the target bars masked, plus planning targets for them.
 """
@@ -28,9 +42,10 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from riffgen.dataset.serialize import (SEG_HEADER, SEG_MIDDLE, SEG_PREFIX, SEG_SONG, SEG_SUFFIX,
-                                       Featurizer, TrackPlan, header_tokens, make_track_plan, section_in_effect,
-                                       serialize_bar, triplet_token_ids)
+                                       Featurizer, TrackPlan, header_tokens, make_track_plan, phrase_positions,
+                                       section_in_effect, serialize_bar, triplet_token_ids)
 from riffgen.dataset.store import SongView
+from riffgen.tokens import sections as sections_mod
 from riffgen.tokens.vocab import K, Vocab
 
 ONSET_SLOTS = 48
@@ -55,8 +70,20 @@ class SamplerConfig:
     context_loss_weight: float = 0.0
     min_gap_notes_frac: float = 0.5
     hierarchical: bool = False
-    max_song_bars: int = 256
-    max_bar_tokens: int = 96
+    max_song_bars: int = 512
+    max_bar_tokens: int = 192
+    # structure-aware context and long-range training tasks (stage 1 of docs/LONG_CONTEXT.md)
+    related: bool = True
+    local_fraction: float = 0.5
+    related_fraction: float = 0.35
+    anchor_bars: int = 4
+    edge_bars: int = 8
+    far_bars: int = 32
+    reprise_prob: float = 0.25
+    bookend_prob: float = 0.05
+    local_dropout_prob: float = 0.10
+    local_dropout_min: int = 4
+    local_dropout_max: int = 8
 
     @classmethod
     def from_cfg(cls, data_cfg: dict, max_len: int, hierarchical: bool) -> "SamplerConfig":
@@ -73,9 +100,17 @@ class SamplerConfig:
         c.border_shift_prob = float(bs.get("prob", c.border_shift_prob))
         c.border_shift_max = int(bs.get("max_bars", c.border_shift_max))
         for k in ("extra_gap_placeholder", "song_gap_placeholder", "guitar_swap", "guitar_drop",
-                  "segment_length_prob", "gap_min", "gap_max"):
+                  "segment_length_prob", "gap_min", "gap_max", "reprise_prob", "bookend_prob", "far_bars"):
             if k in aug:
                 setattr(c, k, type(getattr(c, k))(aug[k]))
+        ld = aug.get("local_dropout", {}) or {}
+        c.local_dropout_prob = float(ld.get("prob", c.local_dropout_prob))
+        c.local_dropout_min = int(ld.get("min_bars", c.local_dropout_min))
+        c.local_dropout_max = int(ld.get("max_bars", c.local_dropout_max))
+        ctx = data_cfg.get("context", {}) or {}
+        for k in ("related", "local_fraction", "related_fraction", "anchor_bars", "edge_bars"):
+            if k in ctx:
+                setattr(c, k, type(getattr(c, k))(ctx[k]))
         return c
 
 
@@ -122,31 +157,70 @@ class ExampleBuilder:
             return int(rng.choice(others)) if others else c.gap_min
         return int(k)
 
+    def _far_bars(self, view: SongView) -> np.ndarray:
+        """Bars that repeat a bar at least ``far_bars`` bars away (the answer exists, but far away)."""
+        p = np.asarray(view.bars["partners"])
+        idx = np.arange(view.n_bars)[:, None]
+        return ((p >= 0) & (np.abs(p - idx) >= self.cfg.far_bars)).any(1)
+
+    def _bookend_bars(self, view: SongView, edge: int = 16) -> np.ndarray:
+        """Bars of the last ``edge`` bars that repeat a bar of the first ``edge`` bars (the intro returns)."""
+        n = view.n_bars
+        out = np.zeros(n, bool)
+        if n >= 3 * edge:
+            p = np.asarray(view.bars["partners"])[n - edge:]
+            out[n - edge:] = ((p >= 0) & (p < edge)).any(1)
+        return out
+
+    def _phrase(self, view: SongView, s: int | None = None, L: int = 0) -> np.ndarray:
+        return phrase_positions(view.meta.get("borders", [0]), view.n_bars, (s, L) if s is not None else None)
+
     def choose_gap(self, view: SongView, rng, tries: int = 24) -> tuple[int, int] | None:
+        g = self.choose_gap_ex(view, rng, tries=tries)
+        return (g[0], g[1]) if g else None
+
+    def choose_gap_ex(self, view: SongView, rng, mode: str | None = None, strict: bool = False,
+                      tries: int = 24) -> tuple[int, int, str] | None:
+        """Pick a hidden part. mode: normal | reprise | bookend (None = drawn from the configured shares).
+
+        reprise: most of the bars repeat a bar >= far_bars away. bookend: the gap is in the last 16
+        bars and repeats the first 16 (the intro returns). Falls back to a normal gap unless ``strict``.
+        """
         c = self.cfg
         n = view.n_bars
         ok = self.eligible_targets(view)
         if n < c.gap_min or ok.sum() < c.gap_min:
             return None
+        if mode is None:
+            r = rng.random()
+            mode = "bookend" if r < c.bookend_prob else "reprise" if r < c.bookend_prob + c.reprise_prob else "normal"
         borders = [b for b in view.meta.get("borders", [0]) if b < n] or [0]
-        seg_len = {s["start"]: s["end"] - s["start"] for s in view.meta.get("segments", []) if s["kind"] == "music"}
-        for _ in range(tries):
-            s = int(borders[rng.integers(len(borders))])
-            if rng.random() < c.segment_length_prob and c.gap_min <= seg_len.get(s, 0) <= c.gap_max:
-                L = seg_len[s]
-            else:
-                L = self._pick_length(rng)
-            if rng.random() < c.border_shift_prob:
-                s += int(rng.choice([-1, 1])) * int(rng.integers(1, c.border_shift_max + 1))
-            L = min(L, n)
-            if s < 0 or s + L > n:
+        seg_len = {g["start"]: g["end"] - g["start"] for g in view.meta.get("segments", []) if g["kind"] == "music"}
+        for m in ([mode] if (mode == "normal" or strict) else [mode, "normal"]):
+            wanted, need = None, 0.0
+            if m == "reprise":
+                wanted, need = self._far_bars(view), 0.5
+            elif m == "bookend":
+                wanted, need = self._bookend_bars(view), 0.25
+            if wanted is not None and not wanted.any():
                 continue
-            if not ok[s:s + L].all():
-                continue
-            with_notes = sum(1 for b in range(s, s + L) if view.bar_has_notes(b, self.v))
-            if with_notes < c.min_gap_notes_frac * L:
-                continue
-            return s, L
+            for _ in range(tries):
+                s = int(borders[rng.integers(len(borders))])
+                if rng.random() < c.segment_length_prob and c.gap_min <= seg_len.get(s, 0) <= c.gap_max:
+                    L = seg_len[s]
+                else:
+                    L = self._pick_length(rng)
+                if rng.random() < c.border_shift_prob:
+                    s += int(rng.choice([-1, 1])) * int(rng.integers(1, c.border_shift_max + 1))
+                L = min(L, n)
+                if s < 0 or s + L > n or not ok[s:s + L].all():
+                    continue
+                if wanted is not None and wanted[s:s + L].mean() < need:
+                    continue
+                with_notes = sum(1 for b in range(s, s + L) if view.bar_has_notes(b, self.v))
+                if with_notes < c.min_gap_notes_frac * L:
+                    continue
+                return s, L, m
         return None
 
     def _next_unit(self, view, b: int, step: int, unknown, plan) -> tuple[tuple, int, int]:
@@ -165,35 +239,179 @@ class ExampleBuilder:
         toks = self._bar(view, b, plan, section=True, strip_tempo=False)
         return ("bar", b, toks), len(toks) + 1, b + step
 
-    def _fill_context(self, view, s: int, L: int, unknown, plan, budget: int):
-        """Closest bars first on both sides, alternating by token count (D27)."""
-        n = view.n_bars
-        pre, suf = [], []
-        pre_used = suf_used = 0
-        pi, si = s - 1, s + L
+    # ------------------------------------------------------------------ context assembly (long range)
+    def _walk(self, included, usable, cost, pi: int, si: int, n: int, budget: int, pre_used: int = 0,
+              suf_used: int = 0):
+        """Take bars closest-first on both sides, alternating by token count, until the budget is used."""
         pre_closed, suf_closed = pi < 0, si >= n
+        used = 0
         while not (pre_closed and suf_closed):
             take_pre = not pre_closed and (suf_closed or pre_used <= suf_used)
-            unit, cost, nxt = self._next_unit(view, pi if take_pre else si, -1 if take_pre else 1, unknown, plan)
-            if cost > budget:
+            b = pi if take_pre else si
+            c = 0 if included[b] else cost(b)
+            if not usable[b] or c > budget - used:
                 if take_pre:
                     pre_closed = True
                 else:
                     suf_closed = True
                 continue
-            budget -= cost
+            included[b] = True
+            used += c
             if take_pre:
-                pre.append(unit)
-                pre_used += cost
-                pi = nxt
+                pre_used += c
+                pi -= 1
                 pre_closed = pi < 0
             else:
-                suf.append(unit)
-                suf_used += cost
-                si = nxt
+                suf_used += c
+                si += 1
                 suf_closed = si >= n
-        pre.reverse()
-        return pre, suf, pi + 1, si
+        return used, pi, si, pre_used, suf_used
+
+    def _related_chunks(self, view: SongView, s: int, L: int, section: int) -> list[tuple[int, int, bool]]:
+        """Bar ranges worth showing although they are far away, most useful first: (lo, hi, ascending).
+
+        * for a bar d bars before the gap that repeats bar q: the range [q, q+d+1+L), i.e. the repeat
+          *and what followed it* (the gap's counterpart); same idea mirrored for bars after the gap
+          (the bars that led into the repeat). ``ascending`` says which end to keep if only part of
+          the range fits: the end nearest to the repeat;
+        * the intro and the outro; other occurrences of the gap's section.
+        """
+        c = self.cfg
+        n = view.n_bars
+        partners = np.asarray(view.bars["partners"])
+
+        def avoid(q: int, lo: int, hi: int, asc: bool = True):
+            lo, hi = max(0, lo), min(n, hi)
+            if not (hi <= s or lo >= s + L):         # never show the hidden bars themselves
+                if q < s:
+                    hi = min(hi, s)
+                else:
+                    lo = max(lo, s + L)
+            return (lo, hi, asc) if hi > lo else None
+
+        pre, post = [], []
+        for d in range(c.anchor_bars):
+            a, b = s - 1 - d, s + L + d
+            if a >= 0:
+                for q in partners[a]:
+                    q = int(q)
+                    if q >= 0 and not (s <= q < s + L):
+                        ch = avoid(q, q, q + d + 1 + L)
+                        if ch:
+                            pre.append(ch)
+            if b < n:
+                for q in partners[b]:
+                    q = int(q)
+                    if q >= 0 and not (s <= q < s + L):
+                        ch = avoid(q, q - d - L, q + 1, asc=False)
+                        if ch:
+                            post.append(ch)
+        order = pre[:1] + post[:1]
+        if s >= 1:
+            order.insert(1 if pre else 0, (0, min(c.edge_bars, s), True))          # intro
+        if s + L < n:
+            order.append((max(n - c.edge_bars, s + L), n, True))                   # outro
+        if section >= 0:
+            label = sections_mod.labels()[section]
+            same = [g for g in view.meta.get("segments", []) if g["kind"] == "music" and g.get("section") == label]
+            same.sort(key=lambda g: abs(g["start"] - s))
+            for g in same[:4]:
+                lo, hi = g["start"], min(g["end"], g["start"] + L)
+                if hi <= s or lo >= s + L:
+                    order.append((lo, hi, True))
+        rest_pre, rest_post = pre[1:], post[1:]
+        for k in range(max(len(rest_pre), len(rest_post))):
+            if k < len(rest_pre):
+                order.append(rest_pre[k])
+            if k < len(rest_post):
+                order.append(rest_post[k])
+        seen, out = set(), []
+        for ch in order:
+            if ch not in seen:
+                seen.add(ch)
+                out.append(ch)
+        return out
+
+    def _units_from_mask(self, view, lo: int, hi: int, included, unknown, plan) -> list:
+        """Bars lo..hi-1 in song order: included known bars, and one ``gap`` unit per skipped run."""
+        units, b = [], lo
+        while b < hi:
+            if included[b] and not unknown[b]:
+                units.append(("bar", b, self._bar(view, b, plan, section=True, strip_tempo=False)))
+                b += 1
+            else:
+                j = b
+                while j < hi and not (included[j] and not unknown[j]):
+                    j += 1
+                units.append(("gap", list(range(b, j))))
+                b = j
+        return units
+
+    def _context_once(self, view, s, L, unknown, plan, budget, hide, section, local_only) -> dict:
+        c = self.cfg
+        n = view.n_bars
+        blocked = np.zeros(n, bool)
+        blocked[s:s + L] = True
+        if hide > 0:
+            blocked[max(0, s - hide):s] = True
+            blocked[s + L:min(n, s + L + hide)] = True
+        if local_only:
+            blocked[:max(0, s - local_only)] = True
+            blocked[min(n, s + L + local_only):] = True
+        usable = ~blocked
+        included = np.zeros(n, bool)
+        cache: dict[int, int] = {}
+
+        def cost(b: int) -> int:
+            if unknown[b]:
+                return 0
+            if b not in cache:
+                cache[b] = len(self._bar(view, b, plan, section=True, strip_tempo=False)) + 1
+            return cache[b]
+
+        upper = len(view.tokens) + len(view.events) + 3 * n      # upper bound for the tokens of all bars
+        if upper <= budget:
+            included[usable] = True
+        else:
+            use_related = c.related and not local_only
+            pi, si = s - 1 - hide, s + L + hide
+            used, pi, si, pu, su = self._walk(included, usable, cost, pi, si, n,
+                                              int(c.local_fraction * budget) if use_related else budget)
+            if use_related:
+                rel_budget, used_rel = int(c.related_fraction * budget), 0
+                for lo, hi, asc in self._related_chunks(view, s, L, section):
+                    for b in (range(lo, hi) if asc else range(hi - 1, lo - 1, -1)):
+                        if not usable[b] or included[b]:
+                            continue
+                        if used_rel + cost(b) > rel_budget:
+                            break                      # part of a chunk is fine: the end that matters first
+                        included[b] = True
+                        used_rel += cost(b)
+                self._walk(included, usable, cost, pi, si, n, budget - used - used_rel, pu, su)
+        idx = np.flatnonzero(included)
+        pre_idx, suf_idx = idx[idx < s], idx[idx >= s + L]
+        pre_lo = int(pre_idx.min()) if len(pre_idx) else s
+        suf_hi = int(suf_idx.max()) + 1 if len(suf_idx) else s + L
+        pre_units = self._units_from_mask(view, pre_lo, s, included, unknown, plan)
+        suf_units = self._units_from_mask(view, s + L, suf_hi, included, unknown, plan)
+        prefix, pre_bar_of = self._emit(view, pre_units)
+        suffix, suf_bar_of = self._emit(view, suf_units)
+        partners = np.asarray(view.bars["partners"][s:s + L])
+        far_in_context = any(int(q) >= 0 and abs(int(q) - (s + k)) >= c.far_bars and included[int(q)]
+                             for k in range(L) for q in partners[k])
+        return {"pre_units": pre_units, "suf_units": suf_units, "prefix": prefix, "suffix": suffix,
+                "pre_bar_of": pre_bar_of, "suf_bar_of": suf_bar_of, "first_pre": pre_lo, "suf_hi": suf_hi,
+                "far_in_context": bool(far_in_context), "context_bars": int(included.sum())}
+
+    def _context(self, view, s, L, unknown, plan, budget, *, hide: int = 0, section: int = -1,
+                 local_only: int = 0) -> dict:
+        """Context around the gap within ``budget`` tokens (prefix + suffix, without the markers)."""
+        res = None
+        for frac in (1.0, 0.92, 0.84, 0.7, 0.5, 0.3, 0.1):       # gap:N tokens are not in the estimate
+            res = self._context_once(view, s, L, unknown, plan, int(budget * frac), hide, section, local_only)
+            if len(res["prefix"]) + len(res["suffix"]) <= budget:
+                break
+        return res
 
     def _emit(self, view, units, *, first_ts: bool = True) -> tuple[list[int], list[int]]:
         """Units in song order -> tokens (+ the song bar of each token, -1 for gaps)."""
@@ -255,12 +473,15 @@ class ExampleBuilder:
         c, v = self.cfg, self.v
         n = view.n_bars
         if spec is not None:
-            s, L = int(spec["start"]), int(spec["len"])
+            s, L, mode = int(spec["start"]), int(spec["len"]), "spec"
         else:
-            g = self.choose_gap(view, rng)
+            g = self.choose_gap_ex(view, rng)
             if g is None:
                 return None
-            s, L = g
+            s, L, mode = g
+        hide = 0
+        if augment and spec is None and c.related and rng.random() < c.local_dropout_prob:
+            hide = int(rng.integers(c.local_dropout_min, c.local_dropout_max + 1))
         plan = self._plan(view, rng, augment)
         if not any(self._has_notes_after_plan(view, b, plan) for b in range(s, s + L)):
             plan = TrackPlan.identity(view)
@@ -286,14 +507,16 @@ class ExampleBuilder:
         if augment and spec is None and rng.random() < c.section_dropout:
             section = -1
         header = header_tokens(v, "infill", plan, self._tempo_before(view, s), n_bars=L, section=section)
+        phrase = self._phrase(view, s, L)
         # at generation time the middle is not known yet: reserve room for it instead
         reserve = max(len(middle), int(spec.get("reserve", 0))) if spec else len(middle)
         budget = c.max_len - len(header) - 3 - reserve - 1 - 2
-        pre_units, suf_units, first_pre, si = self._fill_context(view, s, L, unknown, plan, budget)
-        prefix, pre_bar_of = self._emit(view, pre_units)
-        suffix, suf_bar_of = self._emit(view, suf_units)
+        ctx = self._context(view, s, L, unknown, plan, budget, hide=hide, section=section,
+                            local_only=int(spec.get("local_only", 0)) if spec else 0)
+        prefix, suffix, pre_bar_of, suf_bar_of = ctx["prefix"], ctx["suffix"], ctx["pre_bar_of"], ctx["suf_bar_of"]
+        pre_units, suf_units, first_pre = ctx["pre_units"], ctx["suf_units"], ctx["first_pre"]
         at_start = first_pre == 0
-        at_end = si >= n
+        at_end = ctx["suf_hi"] >= n
         ids = list(header) + [v.fim_prefix_id] + ([v.start_id] if at_start else []) + prefix + [v.fim_suffix_id] \
             + suffix + ([v.end_id] if at_end else []) + [v.fim_middle_id] + middle + [v.eos_id]
         loss = np.zeros(len(ids), np.float32)
@@ -308,14 +531,18 @@ class ExampleBuilder:
         m0 = len(ids) - len(middle) - 1
         loss[m0:] = 1.0
         feat = Featurizer(v, view.bars["ticks"], np.stack([view.bars["ts_num"], view.bars["ts_den"]], 1), plan.tunings,
-                          {SEG_PREFIX: first_pre, SEG_SUFFIX: s + L, SEG_MIDDLE: s}, ref_bar=s).run(ids)
+                          {SEG_PREFIX: first_pre, SEG_SUFFIX: s + L, SEG_MIDDLE: s}, ref_bar=s,
+                          bar_phrase=phrase).run(ids)
         ex = {"ids": np.array(ids, np.int32), "loss": loss, **feat,
               "meta": {"song": view.meta["id"], "task": "infill", "start": s, "len": L, "section": section,
-                       "swap": plan.swapped, "drop": plan.dropped, "extra_gap": extra,
-                       "prefix_bars": len(pre_units), "suffix_bars": len(suf_units)}}
+                       "swap": plan.swapped, "drop": plan.dropped, "extra_gap": extra, "mode": mode, "hide": hide,
+                       "first_pre": first_pre, "context_bars": ctx["context_bars"],
+                       "far_in_context": ctx["far_in_context"],
+                       "prefix_bars": sum(u[0] == "bar" for u in pre_units),
+                       "suffix_bars": sum(u[0] == "bar" for u in suf_units)}}
         if c.hierarchical:
             ex["song"] = self.song_memory(view, plan, target=(s, s + L), unknown=unknown, extra=extra,
-                                          tok_bar=feat["bar"], seg=feat["seg"], ref=s)
+                                          tok_bar=feat["bar"], seg=feat["seg"], ref=s, bar_phrase=phrase)
         return ex
 
     def _context_weights(self, view, toks, bar_of, cw) -> np.ndarray:
@@ -364,19 +591,20 @@ class ExampleBuilder:
         loss[b0:b0 + len(body)] = self._context_weights(view, body, bar_of, 1.0)
         if at_end:
             loss[-1] = 1.0
+        phrase = self._phrase(view)
         feat = Featurizer(v, view.bars["ticks"], np.stack([view.bars["ts_num"], view.bars["ts_den"]], 1), plan.tunings,
-                          {SEG_SONG: a}, ref_bar=a).run(ids)
+                          {SEG_SONG: a}, ref_bar=a, bar_phrase=phrase).run(ids)
         ex = {"ids": np.array(ids, np.int32), "loss": loss, **feat,
               "meta": {"song": view.meta["id"], "task": "song", "start": a, "len": len(units),
                        "swap": plan.swapped, "drop": plan.dropped, "extra_gap": extra}}
         if c.hierarchical:
             ex["song"] = self.song_memory(view, plan, target=(a, last + 1), unknown=unknown, extra=extra,
-                                          tok_bar=feat["bar"], seg=feat["seg"], ref=a)
+                                          tok_bar=feat["bar"], seg=feat["seg"], ref=a, bar_phrase=phrase)
         return ex
 
     # ------------------------------------------------------------------ song memory (huge model)
     def song_memory(self, view: SongView, plan: TrackPlan, target: tuple[int, int], unknown: np.ndarray,
-                    extra, tok_bar: np.ndarray, seg: np.ndarray, ref: int) -> dict:
+                    extra, tok_bar: np.ndarray, seg: np.ndarray, ref: int, bar_phrase: np.ndarray) -> dict:
         """One entry per bar of the whole song. Target bars are masked; planning targets for them."""
         c, v = self.cfg, self.v
         n = view.n_bars
@@ -440,7 +668,7 @@ class ExampleBuilder:
         return {
             "bar_ids": bar_ids, "bar_len": bar_len, **{f"bar_{k}": a for k, a in bar_feat.items()},
             "mask_kind": mask_kind, "rel": rel.astype(np.int16), "tempo": tempo, "ts_num": ts_num, "ts_den": ts_den,
-            "section": section, "aux_pc": aux_pc, "aux_onset": aux_onset,
+            "section": section, "phrase": (bar_phrase[lo:hi] + 1).astype(np.int16), "aux_pc": aux_pc, "aux_onset": aux_onset,
             "aux_mask": (mask_kind == 1) & (aux_pc.sum(1) > 0),
             "pairs": np.array(pairs, np.int32).reshape(-1, 2), "tok_bar": local, "bar_lo": lo,
         }
@@ -492,6 +720,25 @@ def make_val_specs(views: list[tuple[int, SongView]], builder: ExampleBuilder, s
         idx, view = views[order[(k + j) % len(views)]]
         a = int(derive(seed, "val_song", idx, j).integers(0, max(1, view.n_bars - 4)))
         specs.append({"store_song": idx, "song": view.meta["id"], "task": "song", "start": a})
+    return specs
+
+
+def make_far_specs(views: list[tuple[int, SongView]], builder: ExampleBuilder, seed: int, n: int) -> list[dict]:
+    """Fixed gaps whose bars repeat a bar >= far_bars away: they measure whether far context helps."""
+    from riffgen.utils.seed import derive
+    rng = derive(seed, "far_specs")
+    specs: list[dict] = []
+    if not views:
+        return specs
+    order = rng.permutation(len(views))
+    k = tries = 0
+    while len(specs) < n and tries < n * 8:
+        idx, view = views[order[k % len(views)]]
+        k += 1
+        tries += 1
+        g = builder.choose_gap_ex(view, derive(seed, "far_gap", idx, k), mode="reprise", strict=True)
+        if g:
+            specs.append({"store_song": idx, "song": view.meta["id"], "task": "infill", "start": g[0], "len": g[1]})
     return specs
 
 

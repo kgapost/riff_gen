@@ -24,7 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
-from riffgen.dataset.serialize import MAX_FRET_FEAT, N_BAR_REL, N_BEAT, N_POS, N_SEG, NO_PITCH
+from riffgen.dataset.serialize import MAX_FRET_FEAT, N_BAR_REL, N_BEAT, N_PHRASE, N_POS, N_SEG, NO_PITCH
 from riffgen.model.config import ModelConfig
 from riffgen.model.layers import Block, MultiAxisRotary, RMSNorm
 from riffgen.tokens import sections as sections_mod
@@ -48,6 +48,7 @@ class MusicEmbedding(nn.Module):
             self.beat = nn.Embedding(N_BEAT, d)
             self.bar_rel = nn.Embedding(N_BAR_REL, d)
             self.seg = nn.Embedding(N_SEG, d)
+            self.phrase = nn.Embedding(N_PHRASE, d)
 
     def forward(self, f: dict) -> torch.Tensor:
         x = self.tok(f["ids"].long())
@@ -64,6 +65,8 @@ class MusicEmbedding(nn.Module):
                 x = x + self.bar_rel(g("bar_rel", N_BAR_REL - 1))
             if "seg" in f:
                 x = x + self.seg(g("seg", N_SEG - 1))
+            if "phrase" in f:
+                x = x + self.phrase(g("phrase", N_PHRASE - 1))
         return x
 
 
@@ -87,6 +90,7 @@ class SongEncoder(nn.Module):
         self.tempo_emb = nn.Embedding(41, se.d_model)
         self.tsn_emb = nn.Embedding(33, se.d_model)
         self.tsd_emb = nn.Embedding(6, se.d_model)
+        self.phrase_emb = nn.Embedding(N_PHRASE, se.d_model)
         self.song_blocks = nn.ModuleList([Block(se.d_model, se.n_head, se.d_ff, cfg.dropout, cfg.attn_dropout,
                                                 causal=False) for _ in range(se.n_layer)])
         self.song_rope = MultiAxisRotary(se.d_model // se.n_head, {"token": 1.0}, theta=1000.0)
@@ -132,6 +136,8 @@ class SongEncoder(nn.Module):
         h = self.mask_emb(s["mask_kind"].clamp(0, 3)) + self.rel_emb(s["rel"].clamp(0, 128)) \
             + self.tempo_emb(s["tempo"].clamp(0, 40)) + self.tsn_emb(s["ts_num"].clamp(0, 32)) \
             + self.tsd_emb(s["ts_den"].clamp(0, 5))
+        if "phrase" in s:
+            h = h + self.phrase_emb(s["phrase"].clamp(0, N_PHRASE - 1))
         if len(b_idx):
             h = h.index_put((b_idx, k_idx), h[b_idx, k_idx] + self.bar_out(pooled).to(h.dtype))
         valid = s["mask_kind"] != 3

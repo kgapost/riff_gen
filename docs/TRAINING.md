@@ -101,6 +101,17 @@ Configs are layered: `configs/train/{pretrain,finetune}.yaml` < `configs/model/<
 | 34 | A gap inside a repeated section appears twice in the unrolled song. | The first pass is filled; the other stays a `gap:N` placeholder; the result is written into the measures of your original file. |
 | 35 | D33 forces the time signature of the bar before the gap, but the empty bars in your file may have another one. | The output file gets the forced time signature in those measures; `--use-gap-signatures` keeps yours. |
 
+### 4.4 Long context (stage 1 of LONG_CONTEXT.md)
+
+| # | Problem | What we do |
+|---|---|---|
+| 36 | `gap:N` now also means "skipped, far away", not only "empty or unknown". | Intended (D63). The bars' positions on the musical-time axis keep the true distance; the model learns that a skipped run is unknown. |
+| 37 | The related bars are chosen from repeats found by our riff analysis (similarity ≥ 0.9). A wrong analysis means wrong or missing far bars. | `far_in_context` per example (sampler log) shows how often the far repeat is in the window; `val_far/loss` and `python -m riffgen.eval --long-context N` show whether it helps. Listen to `reports/preview_*` (`python -m riffgen.dataset.preview`). |
+| 38 | At generation the hidden bars are empty, so their repeats are unknown; only the repeats of the *neighbouring* bars, intro, outro and same section can be found. | Training builds the window the same way (it never looks up the hidden bars' own repeats), so there is no train/generation mismatch. Reprise gaps are still found because the repeat of the bar before the gap leads to what followed it. |
+| 39 | The model could rely on far context too much and copy the intro. | `neighbour_copy` and the plagiarism check (SELF-QUOTE) flag it; the reprise share (25 %) is a config value (`augment.reprise_prob`). |
+| 40 | Huge's song memory is 4× larger (512 bars × 192 tokens): more memory in the data loader and in the bar encoder (~1.2 s extra per step is plausible; not measured). | Gradient checkpointing is on; lower `max_song_bars` / `max_bar_tokens` in `configs/model/huge.yaml` if memory is tight. |
+| 41 | Songs that fit the window are shown completely, so long-context tasks (reprise, bookend) matter mainly for long songs. | Preprocessing prints how many songs fit 4k/8k/16k/32k tokens and how many have far repeats; if few DadaGP songs do, the album fine-tuning set carries these tasks (the same config applies there). |
+
 ## 5. Rough time and memory budget
 
 | | baseline | big | huge |

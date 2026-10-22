@@ -333,8 +333,8 @@ def cmd_list(args) -> None:
                  if u.strip() and not u.strip().startswith("#")]
     if not urls:
         sys.exit("give one or more artist page URLs (or --file)")
-    if args.delay[0] < 10:
-        sys.exit("--delay below 10 s is not allowed; keep the load on the site low")
+    if args.delay[0] < 5:
+        sys.exit("--delay below 5 s is not allowed; keep the load on the site low")
     out = Path(args.out)
     fetcher = PoliteFetcher(tuple(args.delay), args.user_agent, out / "cache", args.cache_days)
     all_rows: list[dict] = []
@@ -368,8 +368,8 @@ def main(argv=None) -> None:
     a.add_argument("--min-rating", type=float, default=4.4, help="keep tabs rated above this (default 4.4)")
     a.add_argument("--min-votes", type=int, default=1, help="ignore ratings with fewer votes")
     a.add_argument("--best-only", action="store_true", help="only the best-rated version of each song")
-    a.add_argument("--delay", type=float, nargs=2, default=[30.0, 60.0], metavar=("MIN", "MAX"),
-                   help="random pause between requests in seconds (default 30-60, minimum 10)")
+    a.add_argument("--delay", type=float, nargs=2, default=[7.5, 15.0], metavar=("MIN", "MAX"),
+                   help="random pause between requests in seconds (default 7.5-15, minimum 5)")
     a.add_argument("--cache-days", type=float, default=7.0)
     a.add_argument("--user-agent", default=USER_AGENT)
     a.add_argument("--out", default=str(DEFAULT_OUT))

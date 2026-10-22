@@ -17,9 +17,19 @@ data:
     song_gap_placeholder: 0.1
     guitar_swap: 0.5
     guitar_drop: 0.2
+    # long-range training tasks (docs/LONG_CONTEXT.md, stage 1)
+    far_bars: 32               # "far" = a repeat partner at least this many bars away
+    reprise_prob: 0.25         # share of gaps whose bars repeat a far bar (the answer exists, far away)
+    bookend_prob: 0.05         # share of gaps in the last 16 bars that repeat the intro
+    local_dropout: {prob: 0.10, min_bars: 4, max_bars: 8}   # hide the closest bars on both sides
   section_dropout: 0.3
+  # How the window is filled when a song is longer than it (docs/LONG_CONTEXT.md, stage 1):
+  # local bars, then bars related to the gap (repeats of the bars next to it and what followed them,
+  # intro, outro, same section), the rest is skipped as gap:N.
+  context: {related: true, local_fraction: 0.5, related_fraction: 0.35, anchor_bars: 4, edge_bars: 8}
   holdout_gap_lengths: [4, 8]    # fixed validation gaps on the held-out songs (D32, D43)
   dadagp_val: 64                 # small DadaGP validation set: watches for forgetting
+  val_far: 32                    # extra fixed gaps in the held-out songs that repeat a far bar
 
 finetune:
   # method: full | lora. Default per model size (configs/model: baseline full, big/huge lora);

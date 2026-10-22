@@ -20,6 +20,9 @@ same features in both. Features:
              alike to the model even though the string numbers differ
     beat     metrical strength of the onset (downbeat, beat, 8th, 16th, triplet, finer)
     seg      header / prefix / suffix / middle / song body
+    phrase   bar k (1..16) inside its phrase: the distance to the nearest riff/section border
+             before it. The gap edges count as borders, so the hidden part starts at 1 in
+             training and at generation alike (see ``phrase_positions``)
 """
 
 from __future__ import annotations
@@ -38,6 +41,8 @@ POS_UNIT = 40       # tick resolution of the position-in-bar embedding (1/24 qua
 N_POS = 385         # 0 = none, 1..384 = 16 quarters
 BAR_REL_MAX = 64    # bar relative to the target: -64..63, 128 = none
 N_BAR_REL = 129
+N_PHRASE = 18        # 0 = none, 1..16 = bar 1..16 of its phrase (segment), 17 spare
+PHRASE_CAP = 16
 NO_PITCH = 128
 MAX_FRET_FEAT = 31  # 0..29 frets, 31 = none
 
@@ -197,8 +202,9 @@ class Featurizer:
     FIELDS = ("bar", "tick", "inst", "pitch", "fret", "sfb", "beat", "seg", "pos")
 
     def __init__(self, vocab: Vocab, bar_ticks: np.ndarray, bar_ts: np.ndarray, tunings: dict[int, tuple[int, ...]],
-                 seg_start_bars: dict[int, int], ref_bar: int):
+                 seg_start_bars: dict[int, int], ref_bar: int, bar_phrase: np.ndarray | None = None):
         self.v = vocab
+        self.bar_phrase = bar_phrase
         self.bar_ticks = np.asarray(bar_ticks, np.int64)
         self.bar_start = np.concatenate([[0], np.cumsum(self.bar_ticks)])
         self.bar_ts = bar_ts
@@ -234,10 +240,10 @@ class Featurizer:
         b = min(max(b, 0), len(self.bar_ts) - 1)
         return int(self.bar_ts[b][0]), int(self.bar_ts[b][1])
 
-    def step(self, tok: int) -> tuple[int, int, int, int, int, int, int, int, int, float, float]:
+    def step(self, tok: int) -> tuple:
         """Features of ``tok`` (and advance the state).
 
-        Returns (bar, tick, inst, pitch, fret, sfb, beat, seg, pos_bucket, time16, phase16).
+        Returns (bar, tick, inst, pitch, fret, sfb, beat, seg, pos_bucket, time16, phase16, phrase).
         """
         v = self.v
         kind = int(v.kind[tok])
@@ -293,7 +299,10 @@ class Featurizer:
         t = self._bar_time(bar) + tick
         time16 = (t - self.ref_time) / 240.0
         phase16 = tick / 240.0
-        return (bar, tick, inst, pitch, fret, sfb, beat, self.seg, pos, time16, phase16)
+        phrase = 0
+        if not header and self.bar_phrase is not None and 0 <= bar < len(self.bar_phrase):
+            phrase = 1 + min(int(self.bar_phrase[bar]), PHRASE_CAP - 1)
+        return (bar, tick, inst, pitch, fret, sfb, beat, self.seg, pos, time16, phase16, phrase)
 
     def run(self, ids) -> dict[str, np.ndarray]:
         rows = [self.step(int(t)) for t in ids]
@@ -302,7 +311,7 @@ class Featurizer:
 
 def rows_to_arrays(rows: list[tuple], ref_bar: int) -> dict[str, np.ndarray]:
     if not rows:
-        rows_arr = np.zeros((0, 11), np.float64)
+        rows_arr = np.zeros((0, 12), np.float64)
     else:
         rows_arr = np.array(rows, dtype=np.float64)
     bar = rows_arr[:, 0].astype(np.int32)
@@ -322,7 +331,33 @@ def rows_to_arrays(rows: list[tuple], ref_bar: int) -> dict[str, np.ndarray]:
         "pos": rows_arr[:, 8].astype(np.int16),
         "time": rows_arr[:, 9].astype(np.float32),
         "phase": rows_arr[:, 10].astype(np.float32),
+        "phrase": rows_arr[:, 11].astype(np.int8),
     }
 
 
-FEATURE_KEYS = ("bar_rel", "inst", "pitch", "fret", "sfb", "beat", "seg", "pos", "time", "phase")
+FEATURE_KEYS = ("bar_rel", "inst", "pitch", "fret", "sfb", "beat", "seg", "pos", "phrase", "time", "phase")
+
+
+def phrase_positions(borders, n_bars: int, gap: tuple[int, int] | None = None) -> np.ndarray:
+    """Per bar: how many bars after the nearest border before it (0 = first bar of its phrase).
+
+    ``borders`` are the starts of the detected riffs/sections. With ``gap=(start, length)`` the
+    bars inside the gap are measured from the gap start (their own borders are ignored) and the
+    first bar after the gap is a border: this is all that is known at generation time, so
+    training uses exactly the same rule.
+    """
+    bs = {int(b) for b in borders if 0 <= int(b) < n_bars} | {0}
+    if gap is not None:
+        s, L = gap
+        bs = {b for b in bs if not (s < b < s + L)} | {s}
+        if s + L < n_bars:
+            bs.add(s + L)
+    starts = sorted(bs)
+    out = np.zeros(n_bars, np.int16)
+    j, cur = 0, 0
+    for b in range(n_bars):
+        while j < len(starts) and starts[j] <= b:
+            cur = starts[j]
+            j += 1
+        out[b] = min(b - cur, PHRASE_CAP - 1)
+    return out

@@ -16,7 +16,8 @@ from riffgen.dataset.loader import SourceSpec, StreamConfig, TrainStream
 from riffgen.dataset.store import Store
 from riffgen.model.model import RiffGenModel
 from riffgen.train import checkpoint as ckpt_mod
-from riffgen.train.common import (check_vocab, count_params, fixed_val_examples, load_model_yaml, model_config,
+from riffgen.train.common import (check_vocab, count_params, fixed_far_examples, fixed_val_examples, load_model_yaml,
+                                  model_config,
                                   repo_path, resolve_device_batch, sampler_config, setup_device, stage_config)
 from riffgen.train.trainer import Trainer, TrainConfig
 from riffgen.utils.config import load_config
@@ -68,7 +69,13 @@ def main(argv=None) -> None:
     val_sets = {"val": val}
     if val:
         val_sets["val_infill"] = [e for e in val if e["meta"]["task"] == "infill"]
-    log.info("validation: %d fixed examples (%d infill)", len(val), len(val_sets.get("val_infill", [])))
+    n_far = int(cfg.data.get("val_far", 0) or 0)
+    if n_far:
+        far = fixed_far_examples(run_dir, "val_far", val_store, vocab, sc, seed, n_far)
+        if far:
+            val_sets["val_far"] = far
+    log.info("validation: %d fixed examples (%d infill, %d far)", len(val), len(val_sets.get("val_infill", [])),
+             len(val_sets.get("val_far", [])))
 
     sources = [SourceSpec(path=str(repo_path(s["path"])), split=s.get("split", "train"),
                           weight=float(s.get("weight", 1.0)), share=s.get("share"),

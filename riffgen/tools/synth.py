@@ -168,3 +168,57 @@ def write_album(root: str | Path, n_songs: int = 8, seed: int = 1, unfinished: i
         toks = synth_song_tokens(rng, n_strings=7, two_guitars=True, with_lead=False, with_repeat=False, gap_bars=6)
         write(root / "songs" / f"unfinished{j:02d}.gp5", toks, marker_every=8)
     return files
+
+
+NEEDLE = ("distorted0:note:s1:f13",)     # a note that only the intro riff uses
+
+
+def synth_long_song_tokens(rng, n_bars: int = 160) -> list[str]:
+    """A long song for the long-context tests: intro riff X (4 bars, with a unique note), verse/chorus/
+    bridge sections of 8 bars that come back several times, and X again in the last 4 bars."""
+    tempo = 140
+    tok = ["artist:synth", "downtune:0", f"tempo:{tempo}", "start"]
+    ticks = 3840
+    x_bar = [(0, [(1, 13)], []), (960, [(6, 0)], ["nfx:palm_mute"]), (1440, [(6, 3)], ["nfx:palm_mute"]),
+             (1920, [(1, 13), (6, 0)], []), (2880, [(6, 5)], ["nfx:palm_mute"])]
+    parts = {name: _riff(rng, 8, ticks, low, 6, "riff") for name, low in (("V", 0), ("C", 5), ("B", 8))}
+    form = ["X"]
+    while sum(4 if f == "X" else 8 for f in form) < n_bars - 4:
+        form += ["V", "C"] if len(form) % 5 else ["B", "V", "C"]
+    form.append("X")
+    bars = []
+    for f in form:
+        if f == "X":
+            bars += [x_bar] * 4
+        else:
+            bars += parts[f]
+    for bar in bars:
+        tok.append("new_measure")
+        events: dict[int, list[str]] = {}
+        for t, notes, fx in bar:
+            lst = events.setdefault(t, [])
+            for st, fr in notes:
+                lst.append(f"distorted0:note:s{st}:f{fr}")
+                lst.extend(fx)
+            lst.append(f"distorted1:note:s{notes[-1][0]}:f{notes[-1][1]}")
+        cur = 0
+        for t in sorted(events):
+            if t > cur:
+                tok += [f"wait:{w}" for w in split_wait(t - cur)]
+                cur = t
+            tok += events[t]
+        tok += [f"wait:{w}" for w in split_wait(ticks - cur)]
+    tok.append("end")
+    return tok
+
+
+def write_long_corpus(root: str | Path, n_songs: int = 4, n_bars: int = 160, seed: int = 5) -> list[Path]:
+    root = Path(root)
+    rng = np.random.default_rng(seed)
+    paths = []
+    for i in range(n_songs):
+        p = root / "L" / "Long" / f"long{i:02d}.gp5.tokens.txt"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(synth_long_song_tokens(rng, n_bars)), encoding="utf-8")
+        paths.append(p)
+    return paths

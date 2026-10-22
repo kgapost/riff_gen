@@ -9,7 +9,7 @@ import torch
 
 from riffgen import CONFIG_DIR, REPO_DIR
 from riffgen.dataset.loader import build_fixed_examples
-from riffgen.dataset.sampler import ExampleBuilder, SamplerConfig, make_val_specs
+from riffgen.dataset.sampler import ExampleBuilder, SamplerConfig, make_far_specs, make_val_specs
 from riffgen.dataset.store import Store
 from riffgen.model.config import ModelConfig
 from riffgen.tokens.vocab import Vocab
@@ -79,6 +79,20 @@ def fixed_val_examples(run_dir: Path, name: str, store: Store, vocab: Vocab, sc:
         builder = ExampleBuilder(vocab, sc)
         views = [(i, store.view(i)) for i in store.indices(split)]
         specs = make_val_specs(views, builder, seed, n_infill, n_song)
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        spec_path.write_text(json.dumps(specs, indent=1))
+    return build_fixed_examples(specs, store, vocab, sc)
+
+
+def fixed_far_examples(run_dir: Path, name: str, store: Store, vocab: Vocab, sc: SamplerConfig, seed: int, n: int,
+                       split: str = "val") -> list[dict]:
+    """Fixed gaps that repeat a bar >= far_bars away. Same files, same gaps in every run (D43)."""
+    spec_path = run_dir / f"{name}_specs.json"
+    if spec_path.is_file():
+        specs = json.loads(spec_path.read_text())
+    else:
+        builder = ExampleBuilder(vocab, sc)
+        specs = make_far_specs([(i, store.view(i)) for i in store.indices(split)], builder, seed, n)
         spec_path.parent.mkdir(parents=True, exist_ok=True)
         spec_path.write_text(json.dumps(specs, indent=1))
     return build_fixed_examples(specs, store, vocab, sc)

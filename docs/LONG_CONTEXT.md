@@ -70,7 +70,34 @@ fine-tuning data is small, so we need all three.
 
 Four stages. Each one is useful alone, and each is measured before the next is built (§5).
 
-### Stage 1: use what we already compute (days, no new architecture)
+### Stage 1: use what we already compute (days, no new architecture) — DONE
+
+Implemented and tested (decisions D63-D66 in the README). What was built, with the exact rules:
+
+- **Context assembly** (`riffgen/dataset/sampler.py`, used for training *and* generation, so the
+  model sees the same thing in both). If the whole song fits into the window it is shown
+  completely. Otherwise: local bars (closest first, alternating sides) take 50 % of the token
+  budget; then related bars take up to 35 %, in this order: the repeat of the nearest bar
+  before the gap *and what followed it*, the intro (first 8 bars), the same for the nearest bar
+  after the gap (the bars that led into its repeat), the outro (last 8 bars), up to 4 other
+  occurrences of the gap's section, then the remaining repeats of the 4 bars before and after
+  the gap. A chunk may be taken partly (the end nearest to the repeat first). Whatever budget
+  is left goes back to local bars. Skipped bars are `gap:N`; the hidden bars are never shown.
+- **Training tasks**: reprise gaps 25 %, bookend gaps 5 %, hidden local bars 10 % (4-8 bars on
+  both sides); logged per example in `sampler_log.jsonl` (`mode`, `hide`, `far_in_context`).
+- **Phrase position**: bar 1-16 inside its riff/section, an embedding for every token and for
+  every bar of huge's song memory.
+- **Huge**: 512 bars, 192 tokens per bar.
+- **Measurement** (`stats.json` → `long_context` after preprocessing; `val_far/loss` in every
+  training log; `python -m riffgen.eval --long-context N`): loss on gaps whose bars repeat a
+  far bar, with the full window vs. only ±16 bars. The difference is the real use of far context.
+
+Measured on synthetic 160-bar songs (not music: it only shows the mechanism works), 60 gaps
+that repeat a bar ≥ 32 bars away, window 2,048 tokens: the far repeat is inside the window in
+**88 %** of the gaps with the new assembly and **7 %** with "closest bars first", at the same
+token count. What the trained model does with it is not measured yet: that needs DadaGP.
+
+Original plan (for reference):
 
 1. **Structure-aware context assembly** (sampler and generator). Instead of "closest bars
    first" until the window is full, fill the token budget in three parts:

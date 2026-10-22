@@ -70,7 +70,7 @@ def test_kv_cache_matches_full_forward(dadagp_store, name):
         H, hd = c["pk"].shape[1], c["pk"].shape[3]
         c["gk"], c["gv"], c["n"] = torch.zeros(B, H, T, hd), torch.zeros(B, H, T, hd), 0
     diff = (m.prompt_logits(state)[0] - ref[cut - 1]).abs().max().item()
-    keys = ["ids", "inst", "pitch", "fret", "sfb", "beat", "seg", "pos", "bar_rel", "time", "phase"]
+    keys = ["ids", "inst", "pitch", "fret", "sfb", "beat", "seg", "pos", "phrase", "bar_rel", "time", "phase"]
     for t in range(cut, min(T, cut + 30)):
         f = {k: torch.as_tensor(np.asarray(ex[k][t:t + 1])).reshape(1, 1).expand(B, 1) for k in keys}
         f["abs_bar"] = torch.tensor([[int(ex["bar"][t])]]).expand(B, 1)

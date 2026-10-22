@@ -123,18 +123,12 @@ def build_prompt(view: SongView, vocab: Vocab, sc: SamplerConfig, gap: Gap, sect
     # featurizer positioned right after <fim_middle> (same set-up as in build_infill)
     feat = Featurizer(vocab, view.bars["ticks"], np.stack([view.bars["ts_num"], view.bars["ts_den"]], 1),
                       TrackPlan.identity(view).tunings,
-                      {SEG_PREFIX: _first_prefix_bar(ex, vocab), SEG_SUFFIX: gap.start + gap.length, SEG_MIDDLE: gap.start},
-                      ref_bar=gap.start)
+                      {SEG_PREFIX: int(ex["meta"]["first_pre"]), SEG_SUFFIX: gap.start + gap.length,
+                       SEG_MIDDLE: gap.start},
+                      ref_bar=gap.start, bar_phrase=builder._phrase(view, gap.start, gap.length))
     for t in ids[:cut]:
         feat.step(int(t))
     return prompt, feat
-
-
-def _first_prefix_bar(ex: dict, vocab: Vocab) -> int:
-    seg = ex["seg"]
-    bars = ex["bar"]
-    sel = np.flatnonzero(seg == SEG_PREFIX)
-    return int(bars[sel[0]]) if len(sel) else int(ex["meta"]["start"])
 
 
 def candidate_bars(cand: Candidate, vocab: Vocab, song: SongData, ticks: list[int], ts: list) -> list[Bar]:

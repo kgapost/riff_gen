@@ -36,8 +36,8 @@ class ModelConfig:
     bar_encoder: EncoderConfig = field(default_factory=EncoderConfig)
     song_encoder: EncoderConfig = field(default_factory=lambda: EncoderConfig(6, 768, 12, 2048))
     cross_attn_every: int = 4
-    max_bar_tokens: int = 96
-    max_song_bars: int = 256
+    max_bar_tokens: int = 192
+    max_song_bars: int = 512
     aux_weights: dict = field(default_factory=lambda: {"pc": 0.1, "onset": 0.1, "section": 0.05, "contrastive": 0.05})
     grad_checkpointing: bool = False
 

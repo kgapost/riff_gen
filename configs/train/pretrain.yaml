@@ -11,6 +11,7 @@ data:
   val_store: data/processed/dadagp
   val_infill: 256           # fixed validation examples (saved in the run folder)
   val_song: 128
+  val_far: 64                # fixed gaps that repeat a bar >= 32 bars away (long-context benefit)
   task_mix: {song: 0.7, infill: 0.3}
   # Loss on prefix/suffix tokens of infill examples. 1.0 = "FIM for free" (Bavarian et al.
   # 2022): infill examples then also teach normal continuation, so pretraining is ~3x
@@ -25,7 +26,16 @@ data:
     song_gap_placeholder: 0.1
     guitar_swap: 0.5
     guitar_drop: 0.2
+    # long-range training tasks (docs/LONG_CONTEXT.md, stage 1)
+    far_bars: 32               # "far" = a repeat partner at least this many bars away
+    reprise_prob: 0.25         # share of gaps whose bars repeat a far bar (the answer exists, far away)
+    bookend_prob: 0.05         # share of gaps in the last 16 bars that repeat the intro
+    local_dropout: {prob: 0.10, min_bars: 4, max_bars: 8}   # hide the closest bars on both sides
   section_dropout: 0.3
+  # How the window is filled when a song is longer than it (docs/LONG_CONTEXT.md, stage 1):
+  # local bars, then bars related to the gap (repeats of the bars next to it and what followed them,
+  # intro, outro, same section), the rest is skipped as gap:N.
+  context: {related: true, local_fraction: 0.5, related_fraction: 0.35, anchor_bars: 4, edge_bars: 8}
 
 train:
   max_steps: 6000

@@ -27,7 +27,7 @@ from riffgen.analysis.notes import bar_onsets, bar_vectors
 from riffgen.check import plagiarism as plag
 from riffgen.check import playability as play
 from riffgen.dataset.loader import build_fixed_examples, collate
-from riffgen.dataset.sampler import ExampleBuilder, holdout_specs, make_val_specs
+from riffgen.dataset.sampler import ExampleBuilder, holdout_specs, make_far_specs, make_val_specs
 from riffgen.dataset.store import Store, song_from_view
 from riffgen.eval.metrics import evaluate_examples
 from riffgen.generate import pipeline as gp_pipe
@@ -68,6 +68,8 @@ def main(argv=None) -> None:
     ap.add_argument("--candidates", type=int, default=4)
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--top-p", type=float, default=0.95)
+    ap.add_argument("--long-context", type=int, default=0, metavar="N",
+                    help="also measure the benefit of far context on N gaps that repeat a bar >= 32 bars away")
     ap.add_argument("--index", default=None, help="plagiarism index (sqlite)")
     ap.add_argument("--listen", default=None, help="write a blind listening set here")
     ap.add_argument("--device", default="auto")
@@ -90,6 +92,10 @@ def main(argv=None) -> None:
     res = {"teacher_forced": evaluate_examples(model, examples, vocab, device, amp)}
     log.info("teacher-forced: %s", {k: round(v, 4) for k, v in res["teacher_forced"].items() if isinstance(v, float)})
 
+    if args.long_context:
+        res["long_context"] = long_context_benefit(model, vocab, views, builder, store, sc, device, amp, args)
+        log.info("long context: %s", {k: round(v, 4) if isinstance(v, float) else v
+                                      for k, v in res["long_context"].items()})
     index = plag.Index(repo_path(args.index)) if args.index else None
     prof = play.load_profile()
     rng = np.random.default_rng(args.seed)
@@ -161,6 +167,25 @@ def main(argv=None) -> None:
     log.info("metrics -> %s", out)
     if args.listen:
         write_listening_set(Path(args.listen), listen, args.seed)
+
+
+def long_context_benefit(model, vocab, views, builder, store, sc, device, amp, args) -> dict:
+    """Loss on gaps whose bars repeat a far bar: full structure-aware context vs. only +-16 bars.
+
+    The difference is how much the model really uses distant bars. If it is ~0 the model ignores far
+    context (or the window already holds everything); it should grow with the training stages.
+    """
+    specs = make_far_specs(views, builder, args.seed, args.long_context)
+    if not specs:
+        return {"gaps": 0}
+    full = build_fixed_examples(specs, store, vocab, sc)
+    local = build_fixed_examples([{**sp, "local_only": 16} for sp in specs], store, vocab, sc)
+    r_full = evaluate_examples(model, full, vocab, device, amp)
+    r_local = evaluate_examples(model, local, vocab, device, amp)
+    return {"gaps": len(full), "loss_full": r_full["loss"], "loss_local16": r_local["loss"],
+            "benefit": r_local["loss"] - r_full["loss"],
+            "far_partner_in_context": sum(e["meta"]["far_in_context"] for e in full) / max(1, len(full)),
+            "nll_note_full": r_full.get("nll_note"), "nll_note_local16": r_local.get("nll_note")}
 
 
 def write_listening_set(folder: Path, items: list, seed: int) -> None:
