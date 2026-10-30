@@ -1,7 +1,7 @@
 """Fill the gaps of a song with candidate riffs.
 
-    python -m riffgen.generate --album album_01 --song songs/song_03.gp5
-    python -m riffgen.generate --album album_01 --song songs/song_03.gp5 --gap 33-40 --section bridge --candidates 32
+    python -m riffgen.generate --album caffeine --song song_03.gp5
+    python -m riffgen.generate --album caffeine --song song_03.gp5 --gap 33-40 --section bridge --candidates 32
 
 One run per gap (D35); every gap gets its own folder in outputs/<album>/ with the whole song
 (gap filled) per kept candidate, report.json and check_report.md/csv.
@@ -30,28 +30,21 @@ from riffgen.generate.decode import generate
 from riffgen.gp import writer
 from riffgen.train.checkpoint import load_model
 from riffgen.train.common import repo_path, sampler_config
-from riffgen.utils.config import load_config, save_json
+from riffgen.utils.config import album_config, load_config, save_json
 from riffgen.utils.device import amp_dtype, describe, pick_device, to_device
 from riffgen.utils.log import get_logger
 
 log = get_logger("riffgen.generate")
 
 
-def find_album_config(album: str) -> Path:
-    p = Path(album)
-    if p.suffix in (".yaml", ".yml"):
-        return p
-    return REPO_DIR / "configs" / "albums" / f"{album}.yaml"
-
-
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--album", required=True, help="album id (configs/albums/<id>.yaml) or a config path")
+    ap.add_argument("--album", required=True, help="album folder in data/own, its id, or a folder path")
     ap.add_argument("--song", required=True, help="GP5 file with empty bars (gaps)")
     ap.add_argument("--gap", default=None, help="bars to fill, Guitar Pro numbering, e.g. 33-40")
     ap.add_argument("--section", default=None, help="what the gap should be: " + ", ".join(
         ["intro", "verse", "chorus", "bridge", "solo", "breakdown", "interlude", "outro", "other"]))
-    ap.add_argument("--model", default=None, help="baseline | big | huge (default: album config)")
+    ap.add_argument("--model", default=None, help="baseline | big | huge (default: 'model' in configs/train/finetune.yaml)")
     ap.add_argument("--checkpoint", default=None)
     ap.add_argument("--candidates", type=int, default=None)
     ap.add_argument("--keep", type=int, default=None)
@@ -69,7 +62,7 @@ def main(argv=None) -> None:
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
 
-    acfg = load_config(find_album_config(args.album))
+    acfg = album_config(args.album)
     g = dict(acfg.get("generation") or {})
     n_cand = args.candidates or int(g.get("candidates", 32))
     keep = args.keep or int(g.get("keep", 10))
@@ -80,7 +73,7 @@ def main(argv=None) -> None:
     model_name = args.model or acfg.get("model", "baseline")
     ckpt = repo_path(args.checkpoint) if args.checkpoint else REPO_DIR / "runs" / acfg.album_id / model_name / "best.pt"
     if not ckpt.is_file():
-        raise SystemExit(f"no album network at {ckpt}\nFine-tune first: python -m riffgen.train.finetune {find_album_config(args.album)}")
+        raise SystemExit(f"no album network at {ckpt}\nFine-tune first: python -m riffgen.train.finetune {acfg.album_id}")
 
     device = pick_device(args.device)
     model, vocab, ck = load_model(ckpt, "cpu")

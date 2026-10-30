@@ -1,19 +1,19 @@
-"""Guitar tunings: names, classification and the DadaGP fret normalisation.
+"""Guitar tunings: names, classification and the corpus fret normalisation.
 
 Strings are listed from string 1 (highest) to string N (lowest), as MIDI numbers.
 
-DadaGP only accepts four guitar tuning *shapes* (any uniform downtune allowed):
+the corpus only accepts four guitar tuning *shapes* (any uniform downtune allowed):
 
     std6     E A D G B E          (-5,-4,-5,-5,-5)
     std7     B E A D G B E        (-5,-4,-5,-5,-5,-5)
     drop6    D A D G B E          (-5,-4,-5,-5,-7)
-    dropdbl7 A D A D G B E        (-5,-4,-5,-5,-7,-5)   DadaGP calls this "g7_drop"
+    dropdbl7 A D A D G B E        (-5,-4,-5,-5,-7,-5)   the corpus calls this "g7_drop"
 
 Our target, 7-string Drop A (A E A D G B E, shape (-5,-4,-5,-5,-5,-7)), is NOT one of
-them: dadagp.py raises "unsupported guitar tuning" for it. See
-riffgen/gp/dadagp_bridge.py for how we get around that.
+them: the encoder raises "unsupported guitar tuning" for it. See
+riffgen/gp/codec/ for how we get around that.
 
-DadaGP also *pitch-normalises* drop strings: it subtracts 2 from the fret on the
+the corpus also *pitch-normalises* drop strings: it subtracts 2 from the fret on the
 dropped strings, so the open low D of drop D is written ``s6:f-2``. We convert
 everything back to physical frets (what the player actually plays) and keep the
 real tuning in a ``tuning:`` token.
@@ -101,8 +101,8 @@ def by_name(name: str) -> tuple[int, ...]:
     return _BY_NAME[name]
 
 
-def dadagp_drop_strings(strings) -> frozenset[int]:
-    """Strings whose frets DadaGP shifted by -2 (its drop normalisation)."""
+def drop_strings(strings) -> frozenset[int]:
+    """Strings whose frets the corpus shifted by -2 (its drop normalisation)."""
     c = classify(strings)
     if c is None:
         return frozenset()
@@ -114,10 +114,10 @@ def dadagp_drop_strings(strings) -> frozenset[int]:
     return frozenset()
 
 
-def infer_dadagp_tuning(downtune: int, n_strings: int, has_drop: bool) -> tuple[int, ...]:
-    """Best guess of a DadaGP track's tuning when no GP file is available.
+def infer_tuning(downtune: int, n_strings: int, has_drop: bool) -> tuple[int, ...]:
+    """Best guess of a corpus track's tuning when no GP file is available.
 
-    Mirrors the DadaGP decoder: 7 strings if string 7 is used, drop if a fret -1/-2
+    Mirrors the decoder: 7 strings if string 7 is used, drop if a fret -1/-2
     appears on a drop string. A drop-tuned song that never plays frets 0-1 on the drop
     string cannot be told apart; its frets then stay pitch-correct for standard tuning.
     """

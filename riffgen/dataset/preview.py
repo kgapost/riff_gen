@@ -1,7 +1,7 @@
 """See and hear what the sampler builds (§3.8.3): decode augmented examples to GP5.
 
     python -m riffgen.dataset.preview --album album_01 --n 20
-    python -m riffgen.dataset.preview --store data/processed/dadagp --n 10 --task song
+    python -m riffgen.dataset.preview --store data/processed/pretrain --n 10 --task song
 
 The GP5 is rebuilt from the example's *tokens*, so it shows exactly what the model sees:
 swapped/dropped guitars, ``gap:N`` placeholders (empty bars with a marker), the hidden
@@ -22,7 +22,7 @@ from riffgen.gp import writer
 from riffgen.tokens import tunings as tunings_mod
 from riffgen.tokens.vocab import GUITAR_SLOT
 from riffgen.train.common import load_model_yaml, model_config, repo_path, sampler_config
-from riffgen.utils.config import load_config
+from riffgen.utils.config import album_config, load_config
 from riffgen.utils.seed import derive
 
 
@@ -113,8 +113,7 @@ def main(argv=None) -> None:
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
     if args.album:
-        p = Path(args.album)
-        acfg = load_config(p if p.suffix else REPO_DIR / "configs" / "albums" / f"{args.album}.yaml")
+        acfg = album_config(args.album)
         store = Store(repo_path(acfg.get_path("data.store", f"data/processed/albums/{acfg.album_id}")))
         cfg, name = acfg, acfg.album_id
     else:

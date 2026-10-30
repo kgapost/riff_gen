@@ -1,4 +1,4 @@
-"""Stage 1 of docs/LONG_CONTEXT.md: structure-aware context, far-repeat tasks, phrase positions."""
+"""Long context (README §7): structure-aware context, far-repeat tasks, phrase positions."""
 
 import dataclasses
 
@@ -20,9 +20,9 @@ MAX_LEN = 2048
 def long_store(tmp_path_factory):
     from riffgen.dataset import preprocess
     root = tmp_path_factory.mktemp("long")
-    write_long_corpus(root / "dadagp", n_songs=4, n_bars=160)
+    write_long_corpus(root / "tokens", n_songs=4, n_bars=160)
     out = root / "store"
-    preprocess.main(["dadagp", "--src", str(root / "dadagp"), "--out", str(out), "--workers", "1",
+    preprocess.main(["tokens", "--src", str(root / "tokens"), "--out", str(out), "--workers", "1",
                      "--val-fraction", "0"])
     return Store(out)
 
@@ -158,9 +158,9 @@ def test_training_and_generation_compute_the_same_features(long_store):
     assert np.array_equal(got["pitch"], ex["pitch"][cut:])
 
 
-def test_short_songs_are_unchanged_by_the_new_assembly(dadagp_store):
+def test_short_songs_are_unchanged_by_the_new_assembly(pretrain_store):
     """When everything fits, the window is simply the whole song (nothing skipped)."""
-    st = Store(dadagp_store)
+    st = Store(pretrain_store)
     v = st.load_vocab()
     b = ExampleBuilder(v, SamplerConfig(max_len=4096))
     checked = 0

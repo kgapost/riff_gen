@@ -1,15 +1,15 @@
-"""Similar songs from DadaGP for album fine-tuning (§3.9, D47, D48).
+"""Similar songs from the corpus for album fine-tuning (§3.9, D47, D48).
 
-    python -m riffgen.dataset.similar configs/albums/album_01.yaml [--method features|embeddings]
+    python -m riffgen.dataset.similar caffeine [--method features|embeddings]
 
-1. pool: preprocessed DadaGP songs, minus songs that are also in the album (title/artist or
+1. pool: preprocessed corpus songs, minus songs that are also in the album (title/artist or
    shared 2-bar tab pieces) and songs that are mostly filtered out;
 2. a style vector per riff (option A: musical features; option B: base-model embeddings);
-3. every DadaGP riff: mean similarity to its 5 nearest album riffs; song score = mean of
+3. every the corpus riff: mean similarity to its 5 nearest album riffs; song score = mean of
    its 3 best riffs (riffs, not songs: one prog song can hold very different parts);
 4. select: best songs up to max_songs, max_per_artist per artist, always/never artists,
    7-string tunings preferred;
-5. writes runs/<album>/dadagp_mix.json, reports/dadagp_mix_<album>.csv and GP5 snippets of
+5. writes runs/<album>/pretrain_mix.json, reports/pretrain_mix_<album>.csv and GP5 snippets of
    20 random selected riffs (listen to them, like the filter audit).
 """
 
@@ -28,7 +28,7 @@ from riffgen.analysis.filters import complexity
 from riffgen.analysis.notes import song_onsets
 from riffgen.dataset.pipeline import normalize_title
 from riffgen.dataset.store import Store, song_from_view
-from riffgen.utils.config import load_config, save_json
+from riffgen.utils.config import album_config, save_json
 from riffgen.utils.log import get_logger
 
 log = get_logger("riffgen.similar")
@@ -173,11 +173,11 @@ def _normalize(train: np.ndarray, *others: np.ndarray):
 
 
 def select_for_album(acfg, out: Path | None = None, method: str | None = None, workers: int = 8) -> dict:
-    mix = acfg.get("dadagp_mix") or {}
+    mix = acfg.get("pretrain_mix") or {}
     method = method or mix.get("method", "features")
     from riffgen.train.common import repo_path
     album = Store(repo_path(acfg.get_path("data.store", f"data/processed/albums/{acfg.album_id}")))
-    dpath = repo_path(mix.get("store") or "data/processed/dadagp")
+    dpath = repo_path(mix.get("store") or "data/processed/pretrain")
     dstore = Store(dpath)
     album_idx = album.indices("train")
     # 1. pool and exclusions
@@ -201,7 +201,7 @@ def select_for_album(acfg, out: Path | None = None, method: str | None = None, w
             dropped["mostly_filtered"] += 1
             continue
         pool.append(i)
-    log.info("DadaGP pool: %d songs (removed %s)", len(pool), dropped)
+    log.info("the corpus pool: %d songs (removed %s)", len(pool), dropped)
     # 2. style vectors
     if method == "embeddings":
         ckpt = acfg.get("base_model") or f"runs/pretrain_{acfg.get('model', 'baseline')}/best.pt"
@@ -256,15 +256,15 @@ def select_for_album(acfg, out: Path | None = None, method: str | None = None, w
     ids = [dstore.songs[i]["id"] for i in chosen]
     result = {"album": acfg.album_id, "method": method, "ids": ids,
               "scores": {dstore.songs[i]["id"]: round(song_score[i][0], 4) for i in chosen}, "dropped": dropped}
-    out = out or REPO_DIR / "runs" / acfg.album_id / "dadagp_mix.json"
+    out = out or REPO_DIR / "runs" / acfg.album_id / "pretrain_mix.json"
     save_json(result, out)
     _report(acfg, dstore, chosen, song_score, Path(acfg.get("reports_dir") or REPO_DIR / "reports"))
-    log.info("selected %d DadaGP songs for %s -> %s", len(ids), acfg.album_id, out)
+    log.info("selected %d corpus songs for %s -> %s", len(ids), acfg.album_id, out)
     return result
 
 
 def _drop_tab_duplicates(chosen: list[int], album: Store, dstore: Store, min_shared: int = 4) -> list[int]:
-    """D48: remove DadaGP songs that share several exact 2-bar tab pieces with an album song."""
+    """D48: remove corpus songs that share several exact 2-bar tab pieces with an album song."""
     from riffgen.check.plagiarism import KIND_BAR2, fingerprints, track_events
     av = album.load_vocab()
     album_fp = set()
@@ -283,12 +283,12 @@ def _drop_tab_duplicates(chosen: list[int], album: Store, dstore: Store, min_sha
         if shared < min_shared:
             keep.append(i)
     if len(keep) < len(chosen):
-        log.info("removed %d DadaGP songs that share tab with album songs", len(chosen) - len(keep))
+        log.info("removed %d corpus songs that share tab with album songs", len(chosen) - len(keep))
     return keep
 
 
 def _report(acfg, dstore: Store, chosen: list[int], song_score: dict, reports: Path) -> None:
-    rep = reports / f"dadagp_mix_{acfg.album_id}.csv"
+    rep = reports / f"pretrain_mix_{acfg.album_id}.csv"
     rep.parent.mkdir(parents=True, exist_ok=True)
     with open(rep, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -304,7 +304,7 @@ def _report(acfg, dstore: Store, chosen: list[int], song_score: dict, reports: P
     from riffgen.gp import writer
     rng = np.random.default_rng(0)
     dv = dstore.load_vocab()
-    snip_dir = reports / f"dadagp_mix_{acfg.album_id}"
+    snip_dir = reports / f"pretrain_mix_{acfg.album_id}"
     for i in rng.choice(chosen, size=min(20, len(chosen)), replace=False) if chosen else []:
         s = dstore.songs[int(i)]
         song = song_from_view(dstore.view(int(i)), dv)
@@ -322,7 +322,7 @@ def main(argv=None) -> None:
     ap.add_argument("--method", default=None, help="features | embeddings")
     ap.add_argument("--workers", type=int, default=8)
     args = ap.parse_args(argv)
-    select_for_album(load_config(args.album), method=args.method, workers=args.workers)
+    select_for_album(album_config(args.album), method=args.method, workers=args.workers)
 
 
 if __name__ == "__main__":

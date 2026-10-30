@@ -1,4 +1,4 @@
-"""The whole pipeline on synthetic data: preprocess, pretrain, resume, finetune (+DadaGP mix,
+"""The whole pipeline on synthetic data: preprocess, pretrain, resume, finetune (+the corpus mix,
 plagiarism index), generate (constrained, spliced into the original file), check, eval."""
 
 import json

@@ -17,7 +17,7 @@ Augmentation (all in here, nothing is written to disk, D45):
 * an extra ``gap:N`` placeholder in 20 % of infill examples (§4.3);
 * section-token dropout, so the model also works without ``--section``.
 
-Long-range context (docs/LONG_CONTEXT.md, stage 1). When a song does not fit into the window, the
+Long-range context (README §7). When a song does not fit into the window, the
 context is not "the closest bars until full" any more but three parts:
 
 * ~50 % local: the closest bars on both sides of the gap;
@@ -72,7 +72,7 @@ class SamplerConfig:
     hierarchical: bool = False
     max_song_bars: int = 512
     max_bar_tokens: int = 192
-    # structure-aware context and long-range training tasks (stage 1 of docs/LONG_CONTEXT.md)
+    # structure-aware context and long-range training tasks (README §7)
     related: bool = True
     local_fraction: float = 0.5
     related_fraction: float = 0.35

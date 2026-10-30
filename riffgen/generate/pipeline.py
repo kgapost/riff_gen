@@ -16,7 +16,7 @@ from riffgen.analysis.notes import bar_onsets, song_onsets
 from riffgen.dataset import pipeline as pl
 from riffgen.dataset.sampler import ExampleBuilder, SamplerConfig
 from riffgen.dataset.serialize import SEG_MIDDLE, SEG_PREFIX, SEG_SUFFIX, Featurizer, TrackPlan
-from riffgen.dataset.song import Bar, SongData, parse_dadagp, raw_to_song, ts_ticks
+from riffgen.dataset.song import Bar, SongData, parse_token_file, raw_to_song, ts_ticks
 from riffgen.dataset.store import SongView, view_from_song
 from riffgen.generate.decode import Candidate
 from riffgen.tokens import sections as sections_mod
@@ -133,8 +133,8 @@ def build_prompt(view: SongView, vocab: Vocab, sc: SamplerConfig, gap: Gap, sect
 
 def candidate_bars(cand: Candidate, vocab: Vocab, song: SongData, ticks: list[int], ts: list) -> list[Bar]:
     toks = [t for t in vocab.decode(cand.tokens) if not t.startswith("ts:") and t not in ("<eos>",)]
-    raw = parse_dadagp(["start"] + toks)
-    s = raw_to_song(raw, "cand", {slot: tr.tuning for slot, tr in song.tracks.items()}, dadagp_normalised=False)
+    raw = parse_token_file(["start"] + toks)
+    s = raw_to_song(raw, "cand", {slot: tr.tuning for slot, tr in song.tracks.items()}, normalised=False)
     bars = s.bars[: len(ticks)]
     while len(bars) < len(ticks):
         bars.append(Bar(ticks=ticks[len(bars)]))

@@ -4,10 +4,10 @@ Used for: generated candidates (spliced into *your original song file*, so bass,
 everything else stay exactly as you wrote them, D4), normalized GP5 exports (§3.6 step 8),
 filter audit snippets (D18) and sampler previews.
 
-Unlike the DadaGP decoder we never round a duration: a duration Guitar Pro cannot show as
+Unlike the decoder we never round a duration: a duration Guitar Pro cannot show as
 one note is split into tied notes (or several rests), so every bar keeps its exact length.
-Effect tokens are applied with DadaGP's own functions (format fidelity), plus tremolo
-picking, which DadaGP's decoder drops.
+Effect tokens are applied with the corpus's own functions (format fidelity), plus tremolo
+picking, which the corpus's decoder drops.
 """
 
 from __future__ import annotations
@@ -19,12 +19,12 @@ from pathlib import Path
 import guitarpro as gp
 
 from riffgen.dataset.song import Bar, Event, TrackInfo, parse_note, ts_from_ticks
-from riffgen.gp import dadagp_bridge
-from riffgen.gp.dadagp_bridge import DADAGP_DIR
+from riffgen.gp import codec
+
 from riffgen.tokens.vocab import SLOT_KIND
 
 # Single-note durations Guitar Pro 5 can store: whole..64th, dotted, and tuplets.
-# (DadaGP's list also has values below a 64th note, which GP5 cannot store.)
+# (the corpus's list also has values below a 64th note, which GP5 cannot store.)
 _TUPLETS = [(1, 1), (3, 2), (5, 4), (6, 4), (7, 4), (9, 8), (10, 8), (11, 8), (12, 8), (13, 8)]
 
 
@@ -128,7 +128,7 @@ def _fx_groups(tokens: list[str]) -> list[dict]:
 def _apply_note_fx(note, nfx: list[str]) -> None:
     groups = _fx_groups(nfx)
     plain = [g for g in groups if not g["token"].startswith("nfx:tremoloPicking")]
-    dadagp_bridge.dadagp().tokens_to_note_effect(note, plain)
+    codec.tokens_to_note_effect(note, plain)
     for g in groups:
         if g["token"].startswith("nfx:tremoloPicking:duration"):
             t = int(g["token"].rsplit("duration", 1)[1])
@@ -139,7 +139,7 @@ def _apply_note_fx(note, nfx: list[str]) -> None:
 def _apply_beat_fx(beat, bfx: list[str]) -> None:
     groups = [g for g in _fx_groups(bfx) if g["token"].startswith("bfx:")]
     if groups:
-        dadagp_bridge.dadagp().tokens_to_beat_effect(beat.effect, groups)
+        codec.tokens_to_beat_effect(beat.effect, groups)
 
 
 def _split_event(tokens: list[str]) -> tuple[list[tuple[str, list[str]]], list[str], bool]:
@@ -233,7 +233,7 @@ def _ts(header, ts: tuple[int, int]) -> None:
 
 
 def blank_song():
-    return gp.parse(str(DADAGP_DIR / "blank.gp5"))
+    return codec.blank_song()
 
 
 def new_song(bars: list[Bar], tracks: dict[int, TrackInfo], tempo: float, title: str = "riffgen",

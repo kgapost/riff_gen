@@ -1,4 +1,4 @@
-"""Stage 1: pretrain a base model on DadaGP.
+"""Stage 1: pretrain a base model on the corpus.
 
     python -m riffgen.train.pretrain --model baseline
     python -m riffgen.train.pretrain --model big --resume

@@ -37,8 +37,8 @@ def _example(store, vocab, cfg, i=3):
 
 
 @pytest.mark.parametrize("name", ["baseline", "big", "huge"])
-def test_forward_backward(dadagp_store, name):
-    st = Store(dadagp_store)
+def test_forward_backward(pretrain_store, name):
+    st = Store(pretrain_store)
     v = st.load_vocab()
     m = _model(name, v).train()
     ex = _example(st, v, m.cfg)
@@ -50,8 +50,8 @@ def test_forward_backward(dadagp_store, name):
 
 
 @pytest.mark.parametrize("name", ["baseline", "big", "huge"])
-def test_kv_cache_matches_full_forward(dadagp_store, name):
-    st = Store(dadagp_store)
+def test_kv_cache_matches_full_forward(pretrain_store, name):
+    st = Store(pretrain_store)
     v = st.load_vocab()
     m = _model(name, v)
     ex = _example(st, v, m.cfg)
@@ -79,8 +79,8 @@ def test_kv_cache_matches_full_forward(dadagp_store, name):
     assert diff < 1e-4
 
 
-def test_lora_merge_is_exact(dadagp_store):
-    st = Store(dadagp_store)
+def test_lora_merge_is_exact(pretrain_store):
+    st = Store(pretrain_store)
     v = st.load_vocab()
     m = _model("big", v)
     apply_lora(m, rank=4, alpha=8, dropout=0.0)

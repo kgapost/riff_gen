@@ -1,7 +1,7 @@
 """Evaluate a model on fixed gaps (README §6.4).
 
     python -m riffgen.eval --checkpoint runs/album_01/big/best.pt --store data/processed/albums/album_01 --split holdout
-    python -m riffgen.eval --checkpoint runs/pretrain_big/best.pt --store data/processed/dadagp --split val --gaps 40
+    python -m riffgen.eval --checkpoint runs/pretrain_big/best.pt --store data/processed/pretrain --split val --gaps 40
 
 Reports
 * teacher-forced loss on the gaps, split by token type (note / wait / fx / bar ...);

@@ -1,11 +1,12 @@
 """Stage 2: fine-tune a base model on one album (D7, D8).
 
-    python -m riffgen.train.finetune configs/albums/compound_structure.yaml
-    python -m riffgen.train.finetune configs/albums/compound_structure.yaml --model huge
-    python -m riffgen.train.finetune configs/albums/compound_structure.yaml finetune.method=full
+    python -m riffgen.train.finetune "Compound Structure"
+    python -m riffgen.train.finetune compound_structure --model huge
+    python -m riffgen.train.finetune compound_structure finetune.method=full
 
-Needs: the album store (python -m riffgen.dataset.preprocess album <config>) and a base
-model (runs/pretrain_<model>/best.pt, or ``base_model`` in the album config).
+The album is a folder in data/own; its settings are configs/train/finetune.yaml plus key=value
+overrides. Needs: the album store (python -m riffgen.dataset.preprocess album <album>) and a base
+model (runs/pretrain_<model>/best.pt, or ``base_model=...``).
 
 Writes runs/<album_id>/<model>/{best.pt,last.pt,...}. ``best.pt`` is chosen by the loss on
 fixed gaps of the held-out songs (D32) and training stops early when it stops improving.
@@ -30,7 +31,7 @@ from riffgen.train import checkpoint as ckpt_mod
 from riffgen.train.common import (check_vocab, count_params, fixed_val_examples, load_model_yaml, repo_path,
                                   resolve_device_batch, sampler_config, setup_device, stage_config)
 from riffgen.train.trainer import Trainer, TrainConfig
-from riffgen.utils.config import load_config
+from riffgen.utils.config import album_config
 from riffgen.utils.log import get_logger
 
 
@@ -44,15 +45,15 @@ def run_dir_for(acfg, model_name: str) -> Path:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("album", help="album config, e.g. configs/albums/album_01.yaml")
-    ap.add_argument("--model", default=None, help="baseline | big | huge (default: album config 'model')")
+    ap.add_argument("album", help="album folder in data/own, its id, or a folder path")
+    ap.add_argument("--model", default=None, help="baseline | big | huge (default: 'model' in finetune.yaml)")
     ap.add_argument("--base", default=None, help="base checkpoint (default runs/pretrain_<model>/best.pt)")
     ap.add_argument("--run", default=None)
     ap.add_argument("--no-index", action="store_true", help="skip building the plagiarism index")
     ap.add_argument("overrides", nargs="*")
     args = ap.parse_intermixed_args(argv)
 
-    acfg0 = load_config(args.album, args.overrides)
+    acfg0 = album_config(args.album, args.overrides)
     model_name = args.model or acfg0.get("model", "baseline")
     model_yaml = load_model_yaml(model_name)
     acfg = stage_config(acfg0, model_yaml, "finetune")
@@ -94,19 +95,19 @@ def main(argv=None) -> None:
 
     sc = sampler_config(acfg, mcfg)
     seed = int(acfg.seed)
-    # --- training sources: album songs (+ similar DadaGP songs, D47)
+    # --- training sources: album songs (+ similar corpus songs, D47)
     sources = [SourceSpec(path=str(store.path), split="train", bars_per_example=acfg.data.get("bars_per_example", 16))]
-    mix = acfg.get("dadagp_mix") or {}
+    mix = acfg.get("pretrain_mix") or {}
     if mix.get("enabled"):
-        sel_path = run_dir.parent / "dadagp_mix.json"
+        sel_path = run_dir.parent / "pretrain_mix.json"
         if not sel_path.is_file():
             from riffgen.dataset.similar import select_for_album
             select_for_album(acfg, out=sel_path)
         sel = json.loads(sel_path.read_text())
-        dstore = repo_path(mix.get("store", "data/processed/dadagp"))
+        dstore = repo_path(mix.get("store", "data/processed/pretrain"))
         sources.append(SourceSpec(path=str(dstore), split=None, share=float(mix.get("share", 0.15)),
                                   ids=sel["ids"], bars_per_example=acfg.data.get("bars_per_example", 16)))
-        log.info("DadaGP mix: %d selected songs, share %.0f%%", len(sel["ids"]), 100 * float(mix.get("share", 0.15)))
+        log.info("the corpus mix: %d selected songs, share %.0f%%", len(sel["ids"]), 100 * float(mix.get("share", 0.15)))
 
     # --- validation: fixed gaps on the held-out songs (D32, D43)
     builder = ExampleBuilder(vocab, sc)
@@ -130,11 +131,11 @@ def main(argv=None) -> None:
             val_sets["val_far"] = build_fixed_examples(json.loads(far_path.read_text()), store, vocab, sc)
     else:
         log.warning("no held-out songs (data.holdout): no early stopping, best.pt = last step")
-    dv = int(acfg.data.get("dadagp_val", 0) or 0)
-    dstore_path = repo_path(mix.get("store", "data/processed/dadagp"))
+    dv = int(acfg.data.get("pretrain_val", 0) or 0)
+    dstore_path = repo_path(mix.get("store", "data/processed/pretrain"))
     if dv and (dstore_path / "meta.json").is_file():
         dstore = Store(dstore_path)
-        val_sets["dadagp"] = fixed_val_examples(run_dir, "dadagp_val", dstore, vocab, sc, seed, dv // 2, dv // 2)
+        val_sets["tokens"] = fixed_val_examples(run_dir, "pretrain_val", dstore, vocab, sc, seed, dv // 2, dv // 2)
 
     # --- schedule in epochs (D43: an epoch = new gaps for every song)
     srcs = _Sources(sources)

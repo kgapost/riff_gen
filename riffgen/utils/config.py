@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -121,6 +122,35 @@ def load_config(path: str | Path, overrides: Iterable[str] = ()) -> Cfg:
         k, v = parse_override(ov)
         cfg.set_path(k, v)
     cfg["_source"] = str(resolve_config_path(path))
+    return cfg
+
+
+def album_id(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def album_config(album: str | Path, overrides: Iterable[str] = ()) -> Cfg:
+    """The config of one album: configs/train/finetune.yaml plus the album's folder.
+
+    ``album`` is a folder in data/own ("Compound Structure"), its id ("compound_structure")
+    or a path to any album folder.
+    """
+    own = REPO_DIR / "data" / "own"
+    folder = Path(album)
+    if not folder.is_dir():
+        folder = own / str(album)
+    if not folder.is_dir():
+        hits = [d for d in own.iterdir() if d.is_dir() and album_id(d.name) == str(album)] if own.is_dir() else []
+        if not hits:
+            raise SystemExit(f"album folder not found: {album} (expected data/own/<Album>)")
+        folder = hits[0]
+    cfg = load_config(CONFIG_DIR / "train" / "finetune.yaml")
+    cfg.album_id = album_id(folder.name)
+    cfg.title = folder.name
+    cfg.set_path("data.root", str(folder.resolve()))
+    for ov in overrides:
+        k, v = parse_override(ov)
+        cfg.set_path(k, v)
     return cfg
 
 

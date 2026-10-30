@@ -1,6 +1,6 @@
-"""Look at the raw DadaGP download before preprocessing (checks our assumptions).
+"""Look at the raw the corpus download before preprocessing (checks our assumptions).
 
-    python -m riffgen.dataset.inspect --src data/dadaGP --sample 1000
+    python -m riffgen.dataset.inspect --src data/source --sample 1000
 
 Prints: how many token files / GP files, header tokens, which instruments occur, how
 many guitars per song, downtunes, 7-string and drop-tuning usage, frets outside 0-29,
@@ -14,24 +14,24 @@ from collections import Counter
 
 import numpy as np
 
-from riffgen.dataset.preprocess import find_dadagp_root
-from riffgen.dataset.song import parse_dadagp, read_token_file
+from riffgen.dataset.preprocess import find_source_root
+from riffgen.dataset.song import parse_token_file, read_token_file
 from riffgen.tokens.vocab import GUITARS
 
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--src", default="data/dadaGP")
+    ap.add_argument("--src", default="data/source")
     ap.add_argument("--sample", type=int, default=1000)
     args = ap.parse_args(argv)
-    src = find_dadagp_root(args.src)
+    src = find_source_root(args.src)
     toks = sorted(src.rglob("*.tokens.txt"))
     gps = [p for ext in ("*.gp3", "*.gp4", "*.gp5") for p in src.rglob(ext) if ".pygp." not in p.name]
     jsons = sorted(src.rglob("*.json"))
     print(f"folder: {src}")
     print(f"token files: {len(toks)}   GP files: {len(gps)}   json files: {[p.name for p in jsons][:10]}")
     if not toks:
-        print("no *.tokens.txt files: preprocessing will encode the GP files with the DadaGP encoder (D20)")
+        print("no *.tokens.txt files: preprocessing will encode the GP files with the encoder (D20)")
         return
     with_gp = sum(1 for p in toks[:2000] if p.with_name(p.name[:-len('.tokens.txt')]).is_file())
     print(f"token files with their GP file next to them: {with_gp}/{min(2000, len(toks))}")
@@ -45,7 +45,7 @@ def main(argv=None) -> None:
         t = read_token_file(p)
         total += len(t)
         heads[t[0].split(":")[0]] += 1
-        raw = parse_dadagp(t)
+        raw = parse_token_file(t)
         downtunes[raw.downtune] += 1
         present = set()
         for bar in raw.bars:
@@ -73,7 +73,7 @@ def main(argv=None) -> None:
     print("downtune:", sorted(downtunes.items()))
     print("events per instrument:", insts.most_common())
     print("guitars per song:", sorted(n_guitars.items()))
-    print(f"notes on string 7: {s7}   negative frets (DadaGP drop normalisation): {drop}   frets > 29: {badfret}")
+    print(f"notes on string 7: {s7}   negative frets (the corpus drop normalisation): {drop}   frets > 29: {badfret}")
     print(f"bars with repeat signs: {repeats}")
     print("most common bar lengths (ticks):", ticks.most_common(8))
     print("token kinds:", kinds.most_common(15))

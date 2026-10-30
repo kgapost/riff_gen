@@ -8,7 +8,7 @@ n-grams of 8 events, single bars and pairs of bars -- get fingerprints on three 
     L3 rhythm      onsets only                             info only, never a reason to reject
 
 Fingerprints are looked up in an SQLite index of the album's training set (own songs,
-favourites with their copies, influences, and the DadaGP songs mixed into fine-tuning).
+favourites with their copies, influences, and the corpus songs mixed into fine-tuning).
 A piece found in >= 3 song families and >= 1 % of the families is a common idiom and is
 ignored (D39); copies of one song are one family.
 """
@@ -278,7 +278,7 @@ def check_song(index: Index, song: SongData, bars: range | None, cfg=None) -> Ma
 
 
 def build_album_index(acfg, out: str | Path, extra_folders: list[str] | None = None) -> str:
-    """D40: the album's training set + the DadaGP songs mixed into fine-tuning (D48)."""
+    """D40: the album's training set + the corpus songs mixed into fine-tuning (D48)."""
     import json
 
     from riffgen.dataset.store import Store, song_from_view
@@ -295,10 +295,10 @@ def build_album_index(acfg, out: str | Path, extra_folders: list[str] | None = N
         song = song_from_view(store.view(i), vocab)
         n_fp += idx.add_song(song, own=meta.get("set") == "own", cfg=cfg)
         n_songs += 1
-    sel_path = out.parent / "dadagp_mix.json"
+    sel_path = out.parent / "pretrain_mix.json"
     if sel_path.is_file():
         sel = json.loads(sel_path.read_text())
-        dpath = repo_path((acfg.get("dadagp_mix") or {}).get("store", "data/processed/dadagp"))
+        dpath = repo_path((acfg.get("pretrain_mix") or {}).get("store", "data/processed/pretrain"))
         if (dpath / "meta.json").is_file():
             dstore = Store(dpath)
             dv = dstore.load_vocab()

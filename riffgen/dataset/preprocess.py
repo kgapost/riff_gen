@@ -1,14 +1,15 @@
 """Build processed stores.
 
-    python -m riffgen.dataset.preprocess dadagp --src data/dadaGP --out data/processed/dadagp --workers 12
-    python -m riffgen.dataset.preprocess album configs/albums/compound_structure.yaml
+    python -m riffgen.dataset.preprocess tokens --src data/source --out data/processed/pretrain --workers 12
+    python -m riffgen.dataset.preprocess album "Compound Structure" [key=value ...]
 
-DadaGP: every ``*.tokens.txt`` is used (with the GP file next to it for markers, time
+the corpus: every ``*.tokens.txt`` is used (with the GP file next to it for markers, time
 signatures, track names and real tunings when present). If the download has only GP files,
-they are encoded with the DadaGP encoder (D20).
+they are encoded with the encoder (D20).
 
-Album: all GP3/4/5 files below the album's folders; every guitar must be in 7-string Drop A
-(D10). Holdout songs and all versions of them (``song__v2.gp5``) are marked ``holdout``.
+Album: all GP3/4/5 files below data/own/<Album>; every guitar must be in 7-string Drop A
+(D10). Songs in <Album>/holdout/ (and ``data.holdout``) and all versions of them
+(``song__v2.gp5``) are marked ``holdout``.
 
 Outputs next to the store: ``skipped.csv``, ``filters.csv`` (D18), ``stats.json``.
 """
@@ -32,7 +33,7 @@ from riffgen.dataset import pipeline as pl
 from riffgen.dataset.store import StoreWriter, song_to_arrays
 from riffgen.gp.reader import SkipSong
 from riffgen.tokens.vocab import Vocab, default_vocab
-from riffgen.utils.config import load_config
+from riffgen.utils.config import album_config
 from riffgen.utils.log import get_logger
 
 log = get_logger("riffgen.preprocess")
@@ -40,8 +41,8 @@ log = get_logger("riffgen.preprocess")
 _WORKER: dict = {}
 
 
-def find_dadagp_root(src: str | Path) -> Path:
-    """data/dadaGP vs data/DadaGP: accept either spelling."""
+def find_source_root(src: str | Path) -> Path:
+    """data/source vs data/source: accept either spelling."""
     p = Path(src)
     if p.is_dir():
         return p
@@ -49,7 +50,7 @@ def find_dadagp_root(src: str | Path) -> Path:
     for c in parent.iterdir() if parent.is_dir() else []:
         if c.is_dir() and c.name.lower() == p.name.lower():
             return c
-    raise FileNotFoundError(f"DadaGP folder not found: {src}")
+    raise FileNotFoundError(f"the corpus folder not found: {src}")
 
 
 def _init_worker(cfg_dict: dict) -> None:
@@ -80,7 +81,7 @@ def _work(job: tuple) -> tuple:
     vocab: Vocab = _WORKER["vocab"]
     try:
         if kind == "tokens":
-            song = pl.process_dadagp_file(path, root, cfg)
+            song = pl.process_token_file(path, root, cfg)
         else:
             song = pl.process_gp_file(path, root, cfg, kind=extra.get("song_kind", "own"),
                                       family_group=extra.get("family_group", "own"))
@@ -282,25 +283,25 @@ def export_audit_snippets(results: list, audit_dir: Path, max_files: int = 400) 
 
 # ---------------------------------------------------------------------------
 
-def cmd_dadagp(args) -> None:
-    src = find_dadagp_root(args.src)
+def cmd_tokens(args) -> None:
+    src = find_source_root(args.src)
     out = Path(args.out)
     vocab = default_vocab()
     token_files = sorted(src.rglob("*.tokens.txt"))
     jobs: list[tuple] = []
     if token_files:
         jobs = [("tokens", p, src, {}) for p in token_files]
-        log.info("found %d DadaGP token files under %s", len(jobs), src)
+        log.info("found %d corpus token files under %s", len(jobs), src)
     else:
         gp_files = sorted(p for ext in ("*.gp3", "*.gp4", "*.gp5") for p in src.rglob(ext) if ".pygp." not in p.name)
-        jobs = [("gp", p, src, {"song_kind": "dadagp", "artist_from_folder": True}) for p in gp_files]
-        log.info("no token files; encoding %d GP files with the DadaGP encoder", len(jobs))
+        jobs = [("gp", p, src, {"song_kind": "tokens", "artist_from_folder": True}) for p in gp_files]
+        log.info("no token files; encoding %d GP files with the encoder", len(jobs))
     if args.limit:
         rng = np.random.default_rng(0)
         jobs = [jobs[i] for i in sorted(rng.choice(len(jobs), min(args.limit, len(jobs)), replace=False))]
     cfg = pl.PipelineConfig(use_gp_files=not args.no_gp, require_tuning=None)
     results, skipped = [], []
-    for job, res in run_jobs(jobs, cfg, args.workers, "dadagp"):
+    for job, res in run_jobs(jobs, cfg, args.workers, "tokens"):
         (results if res[0] == "ok" else skipped).append(res if res[0] == "ok" else (res[0], res[1], res[2]))
     val_fraction = args.val_fraction
 
@@ -308,7 +309,7 @@ def cmd_dadagp(args) -> None:
         h = zlib.crc32(meta["family"].encode("utf-8")) % 10000
         return "val" if h < val_fraction * 10000 else "train"
 
-    write_store(out, results, vocab, split_fn, {"source": "dadagp", "src": str(src)})
+    write_store(out, results, vocab, split_fn, {"source": "tokens", "src": str(src)})
     stats = write_reports(out, results, skipped)
     if args.export_gp5:
         rng = np.random.default_rng(0)
@@ -328,7 +329,7 @@ def cmd_dadagp(args) -> None:
 def _reload_for_export(rel: str, src: Path, cfg: pl.PipelineConfig):
     path = src / (rel + ".tokens.txt")
     try:
-        song = pl.process_dadagp_file(path, src, cfg) if path.is_file() else None
+        song = pl.process_token_file(path, src, cfg) if path.is_file() else None
     except Exception:
         return None
     return (song.bars, song.tracks, song.tempo) if song else None
@@ -344,6 +345,8 @@ def album_paths(acfg) -> tuple[Path, list[tuple[str, Path]]]:
         sets.append(("own", p))
     for p in acfg.data.get("others") or []:
         sets.append((Path(p).name, p))
+    if (root / "holdout").is_dir():
+        sets.append(("own", "holdout"))
     out = []
     for name, p in sets:
         path = Path(p)
@@ -355,13 +358,16 @@ def album_paths(acfg) -> tuple[Path, list[tuple[str, Path]]]:
 
 def holdout_families(acfg, root: Path) -> set[str]:
     fams = set()
-    for h in acfg.data.get("holdout") or []:
-        fams.add(pl.own_family(str(h), "x").split("|", 1)[1])
+    files = [str(h) for h in acfg.data.get("holdout") or []]
+    if (root / "holdout").is_dir():
+        files += [p.name for p in (root / "holdout").rglob("*.gp[345]")]
+    for h in files:
+        fams.add(pl.own_family(h, "x").split("|", 1)[1])
     return fams
 
 
 def cmd_album(args) -> None:
-    acfg = load_config(args.album)
+    acfg = album_config(args.album, args.overrides)
     root, sets = album_paths(acfg)
     out = Path(args.out or REPO_DIR / "data" / "processed" / "albums" / acfg.album_id)
     jobs = []
@@ -395,7 +401,7 @@ def cmd_album(args) -> None:
     n_hold = sum(1 for r in results if split_fn(r[2][3]) == "holdout")
     log.info("album %s: %d songs (%d holdout), %d skipped -> %s", acfg.album_id, len(results), n_hold, len(skipped), out)
     if hold and n_hold == 0:
-        log.warning("none of the holdout songs %s was found; check data.holdout in the album config", sorted(hold))
+        log.warning("none of the holdout songs %s was found; check data.holdout", sorted(hold))
     log.info("tokens/bar mean %.1f p90 %.1f; filters: %d context bars, %d dropped bars (see %s)",
              stats["tokens_per_bar"]["mean"], stats["tokens_per_bar"]["p90"], stats["context_bars"],
              stats["dropped_bars"], audit_dir)
@@ -404,20 +410,21 @@ def cmd_album(args) -> None:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    a = sub.add_parser("dadagp")
-    a.add_argument("--src", default="data/dadaGP")
-    a.add_argument("--out", default="data/processed/dadagp")
+    a = sub.add_parser("tokens")
+    a.add_argument("--src", default="data/source")
+    a.add_argument("--out", default="data/processed/pretrain")
     a.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a.add_argument("--limit", type=int, default=0, help="process a random subset (for a quick look)")
     a.add_argument("--no-gp", action="store_true", help="ignore GP files next to the token files")
     a.add_argument("--val-fraction", type=float, default=0.02)
     a.add_argument("--export-gp5", type=int, default=0, help="export N random normalized songs as GP5")
     b = sub.add_parser("album")
-    b.add_argument("album")
+    b.add_argument("album", help="folder in data/own, its id, or a folder path")
+    b.add_argument("overrides", nargs="*", help="key=value, e.g. data.holdout=[own/song_07.gp5]")
     b.add_argument("--out", default=None)
     b.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     args = ap.parse_args(argv)
-    {"dadagp": cmd_dadagp, "album": cmd_album}[args.cmd](args)
+    {"tokens": cmd_tokens, "album": cmd_album}[args.cmd](args)
 
 
 if __name__ == "__main__":

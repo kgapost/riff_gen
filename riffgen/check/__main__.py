@@ -1,9 +1,9 @@
 """Plagiarism and playability checks on any folder of GP5 files (D42).
 
-    python -m riffgen.check --album album_01 --folder outputs/album_01/2026-10-18_song_03_gap_33-40 \
+    python -m riffgen.check --album caffeine --folder outputs/caffeine/2026-10-18_song_03_gap_33-40 \
         --plagiarism --playability --fix --mark
-    python -m riffgen.check --album album_01 --build-index [--extra-reference PATH]
-    python -m riffgen.check --build-dadagp-index        (optional, all of DadaGP, D40)
+    python -m riffgen.check --album caffeine --build-index [--extra-reference PATH]
+    python -m riffgen.check --build-pretrain-index        (optional, all of the corpus, D40)
 
 In a generation folder (with report.json) only the generated bars are checked; elsewhere
 the whole file. Writes check_report.md and check_report.csv into the folder.
@@ -24,15 +24,10 @@ from riffgen.check.report import write_reports
 from riffgen.dataset import pipeline as pl
 from riffgen.gp import writer
 from riffgen.gp.reader import SkipSong
-from riffgen.utils.config import load_config
+from riffgen.utils.config import album_config, load_config
 from riffgen.utils.log import get_logger
 
 log = get_logger("riffgen.check")
-
-
-def album_cfg(album: str):
-    p = Path(album)
-    return load_config(p if p.suffix else REPO_DIR / "configs" / "albums" / f"{album}.yaml")
 
 
 def checked_bars(folder: Path, song) -> range | None:
@@ -52,17 +47,17 @@ def main(argv=None) -> None:
     ap.add_argument("--playability", action="store_true")
     ap.add_argument("--fix", action="store_true", help="write <file>.fixed.gp5 with a better fingering")
     ap.add_argument("--mark", action="store_true", help="write <file>.marked.gp5 with markers on matching bars")
-    ap.add_argument("--reference", default="album", help="album | dadagp")
+    ap.add_argument("--reference", default="album", help="album | pretrain")
     ap.add_argument("--extra-reference", action="append", default=[])
     ap.add_argument("--build-index", action="store_true")
-    ap.add_argument("--build-dadagp-index", action="store_true")
+    ap.add_argument("--build-pretrain-index", action="store_true")
     ap.add_argument("--profile", default=None, help="playability profile yaml")
     args = ap.parse_args(argv)
 
-    if args.build_dadagp_index:
-        build_dadagp_index()
+    if args.build_pretrain_index:
+        build_pretrain_index()
         return
-    acfg = album_cfg(args.album) if args.album else None
+    acfg = album_config(args.album) if args.album else None
     if args.build_index:
         if acfg is None:
             raise SystemExit("--build-index needs --album")
@@ -77,11 +72,11 @@ def main(argv=None) -> None:
     files = sorted(p for p in folder.glob("*.gp5") if not p.name.endswith((".fixed.gp5", ".marked.gp5")))
     index = None
     if args.plagiarism:
-        if args.reference == "dadagp":
-            path = REPO_DIR / "data" / "processed" / "dadagp_index.sqlite"
+        if args.reference == "pretrain":
+            path = REPO_DIR / "data" / "processed" / "pretrain_index.sqlite"
         else:
             if acfg is None:
-                raise SystemExit("--plagiarism needs --album (or --reference dadagp)")
+                raise SystemExit("--plagiarism needs --album (or --reference pretrain)")
             path = REPO_DIR / "runs" / acfg.album_id / "plagiarism_index.sqlite"
         if args.extra_reference:
             path = folder / "_extra_index.sqlite"
@@ -141,21 +136,21 @@ def main(argv=None) -> None:
     log.info("reports: %s", folder / "check_report.md")
 
 
-def build_dadagp_index() -> None:
+def build_pretrain_index() -> None:
     from riffgen.dataset.store import Store, song_from_view
     cfg = load_config(CONFIG_DIR / "plagiarism.yaml")
-    store = Store(REPO_DIR / "data" / "processed" / "dadagp")
+    store = Store(REPO_DIR / "data" / "processed" / "tokens")
     vocab = store.load_vocab()
-    out = REPO_DIR / "data" / "processed" / "dadagp_index.sqlite"
+    out = REPO_DIR / "data" / "processed" / "pretrain_index.sqlite"
     if out.exists():
         out.unlink()
     idx = plag.Index(out)
     from tqdm import tqdm
-    for i in tqdm(range(len(store)), desc="dadagp index"):
+    for i in tqdm(range(len(store)), desc="pretrain index"):
         idx.add_song(song_from_view(store.view(i), vocab), own=False, cfg=cfg)
     idx.finalize(cfg)
     idx.close()
-    log.info("DadaGP index: %s (%.1f GB)", out, out.stat().st_size / 2**30)
+    log.info("the corpus index: %s (%.1f GB)", out, out.stat().st_size / 2**30)
 
 
 if __name__ == "__main__":

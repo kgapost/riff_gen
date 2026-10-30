@@ -19,7 +19,7 @@ filters:
   force_keep: []                # - {file: own/song_03.gp5, bars: 49-56}
   force_drop: []
 
-dadagp_mix:                     # §3.9: similar DadaGP songs mixed into fine-tuning
+pretrain_mix:                   # §3.9: similar corpus songs mixed into fine-tuning
   enabled: true
   share: 0.15
   method: features              # features | embeddings

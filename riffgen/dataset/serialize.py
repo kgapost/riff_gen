@@ -1,6 +1,6 @@
 """Bars -> token ids, and token ids -> musical features.
 
-Serialization follows the DadaGP layout (D21): ``new_measure``, measure tokens, then for
+Serialization follows the corpus layout (D21): ``new_measure``, measure tokens, then for
 every onset the events of each guitar (slot order), with ``wait:`` tokens between onsets
 and up to the end of the bar. Our extra tokens: ``ts:`` (first bar of a segment, after a
 gap, and when it changes), ``section:`` (at section starts), ``gap:N`` for unknown bars.

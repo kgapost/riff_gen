@@ -1,8 +1,8 @@
 """The preprocessing pipeline of §3.6, for one song.
 
-    GP3/4/5 file or DadaGP token file
+    GP3/4/5 file or corpus token file
       1. load (PyGuitarPro 0.6)                        D26
-      2. tuning: own sets must be Drop A; DadaGP keeps its tuning   D10, D11
+      2. tuning: own sets must be Drop A; the corpus keeps its tuning   D10, D11
       3. guitars only (max 3 distorted + 2 clean)      D13
       4. unroll repeats                                D14
       5. section markers -> section labels             D25
@@ -22,7 +22,7 @@ import numpy as np
 from riffgen.analysis import filters as filters_mod
 from riffgen.analysis import riffs as riffs_mod
 from riffgen.analysis.notes import song_onsets
-from riffgen.dataset.song import (SongData, assign_tempi, mark_gaps, parse_dadagp, raw_to_song, read_token_file,
+from riffgen.dataset.song import (SongData, assign_tempi, mark_gaps, parse_token_file, raw_to_song, read_token_file,
                                   ts_from_ticks, ts_ticks)
 from riffgen.dataset.unroll import unroll
 from riffgen.gp import reader as gp_reader
@@ -36,7 +36,7 @@ GP_EXTS = (".gp5", ".gp4", ".gp3")
 class PipelineConfig:
     min_gap_bars: int = 4
     require_tuning: str | None = None           # "drop_a7" for album sets and input songs
-    use_gp_files: bool = True                   # DadaGP: read the GP file next to the tokens
+    use_gp_files: bool = True                   # the corpus: read the GP file next to the tokens
     filters: filters_mod.FilterConfig = field(default_factory=filters_mod.FilterConfig)
     analyze: bool = True
     overrides: dict | None = None
@@ -174,11 +174,11 @@ def analyze(song: SongData, cfg: PipelineConfig, rel_path: str | None = None) ->
 # ---------------------------------------------------------------------------
 # entry points
 
-def process_dadagp_file(token_path: str | Path, root: str | Path, cfg: PipelineConfig) -> SongData:
+def process_token_file(token_path: str | Path, root: str | Path, cfg: PipelineConfig) -> SongData:
     token_path = Path(token_path)
     rel = token_path.relative_to(root).as_posix() if root else token_path.name
     tokens = read_token_file(token_path)
-    raw = parse_dadagp(tokens)
+    raw = parse_token_file(tokens)
     meta = None
     gp_path = find_gp_for_tokens(token_path) if cfg.use_gp_files else None
     if gp_path is not None:
@@ -188,7 +188,7 @@ def process_dadagp_file(token_path: str | Path, root: str | Path, cfg: PipelineC
             meta = None
     slot_tunings = meta.slot_tunings if meta else None
     song_id = rel[: -len(".tokens.txt")] if rel.endswith(".tokens.txt") else rel
-    song = raw_to_song(raw, song_id=song_id, slot_tunings=slot_tunings, dadagp_normalised=True, kind="dadagp")
+    song = raw_to_song(raw, song_id=song_id, slot_tunings=slot_tunings, normalised=True, kind="tokens")
     parts = Path(song_id).parts
     artist = parts[-2] if len(parts) >= 2 else raw.artist.replace("artist:", "")
     song.artist = artist
@@ -218,8 +218,8 @@ def process_gp_file(gp_path: str | Path, root: str | Path | None, cfg: PipelineC
     gp_path = Path(gp_path)
     rel = gp_path.relative_to(root).as_posix() if root else gp_path.name
     enc = gp_reader.encode_own_gp(gp_path, require_tuning=cfg.require_tuning)
-    raw = parse_dadagp(enc.tokens)
-    song = raw_to_song(raw, song_id=rel, slot_tunings=enc.slot_tunings, dadagp_normalised=False, kind=kind)
+    raw = parse_token_file(enc.tokens)
+    song = raw_to_song(raw, song_id=rel, slot_tunings=enc.slot_tunings, normalised=False, kind=kind)
     song.warnings.extend(enc.warnings)
     if enc.removed_tracks:
         song.stats["removed_tracks"] = enc.removed_tracks

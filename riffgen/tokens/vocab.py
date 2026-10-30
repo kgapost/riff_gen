@@ -1,11 +1,11 @@
-"""Vocabulary: the DadaGP tokens first (their IDs never change), our tokens on top (D21).
+"""Vocabulary: the corpus tokens first (their IDs never change), our tokens on top (D21).
 
-The DadaGP part is the token list in DadaGP's ``_DadaGP_song_tokens_frequency.json``
-(vendored in third_party/dadagp), in file order. We add:
+The the corpus part is the token list in the corpus's ``_the corpus_song_tokens_frequency.json``
+(frozen in tokens.json), in file order. We add:
 
-* DadaGP-format tokens that are valid but missing from that list: every guitar note
+* corpus-format tokens that are valid but missing from that list: every guitar note
   on strings 1-7 and frets 0-29 for all five guitar slots (7-string notes are 0.1 % of
-  DadaGP, so many Drop A notes would otherwise be unknown), tempo values, rests.
+  the corpus, so many Drop A notes would otherwise be unknown), tempo values, rests.
 * our tokens: specials, ``task:``, ``track:``, ``tuning:``, ``ts:``, ``section:``,
   ``bars:``, ``gap:``.
 
@@ -25,7 +25,6 @@ from pathlib import Path
 
 import numpy as np
 
-from riffgen import THIRD_PARTY_DIR
 from riffgen.tokens import sections as sections_mod
 from riffgen.tokens import tunings as tunings_mod
 
@@ -75,14 +74,14 @@ class K(IntEnum):
 
 
 # ---------------------------------------------------------------------------
-# DadaGP wait splitting (port of token_splitter.split_wait_token, MIT, Dadabots)
+# the corpus wait splitting (port of token_splitter.split_wait_token, MIT, Dadabots)
 
 COMMON_WAITS = frozenset([1920, 16, 4096, 240, 3840, 512, 2048, 960, 64, 2880, 320, 256, 32, 16384, 480, 8,
                           1024, 640, 1, 360, 192, 128, 120, 40, 60, 2, 8192, 4, 1440, 80, 180, 720, 160])
 
 
 def split_wait(n: int) -> list[int]:
-    """Split a wait of n ticks the way DadaGP v1.1 does."""
+    """Split a wait of n ticks the way the corpus v1.1 does."""
     if n <= 0:
         return []
     if n in COMMON_WAITS:
@@ -190,8 +189,8 @@ def ts_token(num: int, den: int) -> str:
     return f"ts:{num}/{den}"
 
 
-def dadagp_token_list() -> list[str]:
-    path = THIRD_PARTY_DIR / "dadagp" / "_DadaGP_song_tokens_frequency.json"
+def base_token_list() -> list[str]:
+    path = Path(__file__).with_name("tokens.json")
     with open(path, encoding="utf-8") as f:
         return list(json.load(f).keys())
 
@@ -205,9 +204,9 @@ def build_token_list() -> list[str]:
             seen.add(t)
             toks.append(t)
 
-    for t in dadagp_token_list():
+    for t in base_token_list():
         add(t)
-    # valid DadaGP-format tokens missing from the frequency list
+    # valid corpus-format tokens missing from the frequency list
     for slot in range(len(GUITARS)):
         add(rest_token(slot))
         for s in range(1, MAX_STRINGS + 1):

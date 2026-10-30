@@ -1,8 +1,8 @@
-"""Synthetic songs in DadaGP token format (and Drop A GP5 files) for tests and smoke runs.
+"""Synthetic songs in token format (and Drop A GP5 files) for tests and smoke runs.
 
 Not music anyone should listen to, but with the structure the pipeline must handle:
 repeating riffs, a non-repeating lead line, simple chug riffs, double-tracked guitars, drop
-tunings written DadaGP-style (fret -2), 7-string songs, odd meters, repeat signs, silent
+tunings written the corpus-style (fret -2), 7-string songs, odd meters, repeat signs, silent
 guitar stretches (gaps), bass and drums that must be removed.
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from riffgen.dataset.song import parse_dadagp, raw_to_song
+from riffgen.dataset.song import parse_token_file, raw_to_song
 from riffgen.gp import writer
 from riffgen.tokens import tunings as T
 from riffgen.tokens.vocab import split_wait
@@ -119,7 +119,7 @@ def synth_song_tokens(rng, *, n_strings: int = 6, drop: bool = False, downtune: 
     return tok
 
 
-def write_dadagp_corpus(root: str | Path, n_songs: int = 24, seed: int = 0) -> list[Path]:
+def write_token_corpus(root: str | Path, n_songs: int = 24, seed: int = 0) -> list[Path]:
     root = Path(root)
     rng = np.random.default_rng(seed)
     paths = []
@@ -144,8 +144,8 @@ def write_album(root: str | Path, n_songs: int = 8, seed: int = 1, unfinished: i
     files = {"own": [], "favourites": [], "songs": []}
 
     def write(path: Path, toks: list[str], marker_every: int = 0):
-        raw = parse_dadagp(toks)
-        song = raw_to_song(raw, path.stem, {s: tracks_tuning[s] for s in (0, 1)}, dadagp_normalised=False, kind="own")
+        raw = parse_token_file(toks)
+        song = raw_to_song(raw, path.stem, {s: tracks_tuning[s] for s in (0, 1)}, normalised=False, kind="own")
         from riffgen.dataset.song import ts_from_ticks
         for k, bar in enumerate(song.bars):
             bar.ts = ts_from_ticks(bar.ticks)

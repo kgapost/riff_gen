@@ -1,10 +1,10 @@
 """D14: unroll repeats and alternate endings.
 
-DadaGP keeps the repeat signs as measure tokens:
+the corpus keeps the repeat signs as measure tokens:
 
 * ``measure:repeat_open``
 * ``measure:repeat_close:N``  -- N = number of *extra* passes (PyGuitarPro 0.6 normalises
-  GP5's stored value; "play twice" is N=1, the most common value in DadaGP)
+  GP5's stored value; "play twice" is N=1, the most common value in the corpus)
 * ``measure:repeat_alternative:M`` -- M is a *bitmask* of the passes that play this
   ending (3 = endings 1 and 2), not an ending number.
 * ``measure:direction:*`` / ``measure:from_direction:*`` (segno, coda, D.C., ...) are not

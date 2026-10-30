@@ -8,8 +8,8 @@ from riffgen.tokens.vocab import K
 from riffgen.utils.seed import derive
 
 
-def test_examples_are_deterministic_and_well_formed(dadagp_store):
-    st = Store(dadagp_store)
+def test_examples_are_deterministic_and_well_formed(pretrain_store):
+    st = Store(pretrain_store)
     v = st.load_vocab()
     b = ExampleBuilder(v, SamplerConfig(max_len=1024))
     for i in range(len(st)):
@@ -30,10 +30,10 @@ def test_examples_are_deterministic_and_well_formed(dadagp_store):
                 assert e1["ids"][-1] == v.eos_id
 
 
-def test_constraints_accept_real_middles(dadagp_store, album_store):
+def test_constraints_accept_real_middles(pretrain_store, album_store):
     """The grammar must never block real music (except ties onto a note that is not sounding)."""
     total = accepted = 0
-    for path in (dadagp_store, album_store):
+    for path in (pretrain_store, album_store):
         st = Store(path)
         v = st.load_vocab()
         b = ExampleBuilder(v, SamplerConfig(max_len=2048, max_middle_frac=0.9))

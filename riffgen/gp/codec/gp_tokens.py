@@ -10,8 +10,9 @@ import json
 import math
 from fractions import Fraction
 import sys
+from pathlib import Path
 
-from token_splitter import split_rare_token, unsplit_fx
+from .token_splitter import split_rare_token, unsplit_fx
 
 # Note: 
 # "clean" = Clean Electric Guitar or Acoustic Guitar
@@ -1327,7 +1328,7 @@ def convert_strings_for_pygp(strings, pitch_shift=0):
     return gs
 # Tests
 ## LOAD a BLANK GP5 SCORE 
-blankgp5 = gp.parse("blank.gp5")
+blankgp5 = gp.parse(str(Path(__file__).with_name("blank.gp5")))
 blankgp5.tracks = []
 new_track = gp.Track(blankgp5)
 strings = ['E5', 'B4', 'G4', 'D4', 'A3', 'E3']
@@ -1644,7 +1645,7 @@ def tokens2guitarpro(all_tokens, verbose=False):
     # CREATE a new GP5 file from BLANKGP5 
 
     ## LOAD the BLANK GP5 SCORE 
-    blankgp5 = gp.parse("blank.gp5")
+    blankgp5 = gp.parse(str(Path(__file__).with_name("blank.gp5")))
     blankgp5.tracks = []
     blankgp5.tempo = initial_tempo
     

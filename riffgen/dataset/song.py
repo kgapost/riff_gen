@@ -1,4 +1,4 @@
-"""In-memory song representation and DadaGP token parsing.
+"""In-memory song representation and corpus token parsing.
 
 A song is a list of bars. A bar has a length in ticks (quarter note = 960) and a list of
 events. An event is "what one guitar does at one onset": the note tokens (with their
@@ -10,9 +10,9 @@ Canonical form (applied to all data, so the model never has to learn arbitrary o
 
 * guitar slots are ``distorted0-2`` (0-2) and ``clean0-1`` (3-4); within an onset events
   are sorted by slot, notes inside an event by string (1 = highest first, like GP);
-* frets are physical frets: DadaGP's drop-string normalisation (-2) is undone;
+* frets are physical frets: the corpus's drop-string normalisation (-2) is undone;
 * rests are only kept where they end a sounding note (a rest at the start of a bar or
-  after another rest carries no information in the DadaGP format);
+  after another rest carries no information in the corpus format);
 * bad notes (fret < 0 or > 29, string beyond the guitar's strings, two notes on one
   string) are removed and counted.
 """
@@ -101,7 +101,7 @@ class SongData:
     title: str = ""
     family: str = ""
     source: str = ""
-    kind: str = "dadagp"
+    kind: str = "tokens"
     warnings: list[str] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
     analysis: dict = field(default_factory=dict)
@@ -111,7 +111,7 @@ class SongData:
 
 
 # ---------------------------------------------------------------------------
-# Raw DadaGP parsing (all instruments, tokens as written)
+# Raw the corpus parsing (all instruments, tokens as written)
 
 @dataclass
 class RawEvent:
@@ -141,7 +141,7 @@ def read_token_file(path) -> list[str]:
         return [t.strip() for t in f.read().split("\n") if t.strip()]
 
 
-def parse_dadagp(tokens: list[str]) -> RawSong:
+def parse_token_file(tokens: list[str]) -> RawSong:
     artist, downtune, tempo = "unknown", 0, 120
     i = 0
     while i < len(tokens) and tokens[i] != "start":
@@ -329,12 +329,12 @@ def sort_events(bar: Bar) -> None:
 
 
 def raw_to_song(raw: RawSong, song_id: str, slot_tunings: dict[int, tuple[int, ...]] | None = None,
-                *, dadagp_normalised: bool = True, kind: str = "dadagp") -> SongData:
+                *, normalised: bool = True, kind: str = "tokens") -> SongData:
     """Keep guitars only, convert frets to physical frets, canonicalise.
 
     slot_tunings: real tuning per guitar slot (from the GP file). If None, the tuning is
-    inferred from the tokens like the DadaGP decoder does.
-    dadagp_normalised: True if drop strings in the tokens carry DadaGP's -2 shift. False
+    inferred from the tokens like the decoder does.
+    normalised: True if drop strings in the tokens carry the corpus's -2 shift. False
     for our own files, which are encoded with a standard tuning (frets already physical).
     """
     present: dict[int, dict] = {}
@@ -358,9 +358,9 @@ def raw_to_song(raw: RawSong, song_id: str, slot_tunings: dict[int, tuple[int, .
         if slot_tunings and slot in slot_tunings:
             tuning = tuple(slot_tunings[slot])
         else:
-            tuning = tunings_mod.infer_dadagp_tuning(raw.downtune, 7 if info["s7"] else 6, info["drop"])
+            tuning = tunings_mod.infer_tuning(raw.downtune, 7 if info["s7"] else 6, info["drop"])
         tracks[slot] = TrackInfo(slot=slot, tuning=tuning)
-        drop_strings[slot] = tunings_mod.dadagp_drop_strings(tuning) if dadagp_normalised else frozenset()
+        drop_strings[slot] = tunings_mod.drop_strings(tuning) if normalised else frozenset()
 
     stats = CanonStats()
     bars: list[Bar] = []
@@ -404,7 +404,7 @@ def raw_to_song(raw: RawSong, song_id: str, slot_tunings: dict[int, tuple[int, .
 def ts_from_ticks(ticks: int) -> tuple[int, int]:
     """Guess a time signature from a bar length (used only when the GP file is missing).
 
-    Like DadaGP's decoder this cannot tell 3/4 from 6/8 (D23); we prefer quarter notes.
+    Like the corpus's decoder this cannot tell 3/4 from 6/8 (D23); we prefer quarter notes.
     """
     if ticks <= 0:
         return (4, 4)

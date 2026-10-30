@@ -1,11 +1,20 @@
-# Stage 2: album fine-tuning defaults. Album configs inherit this file; model-size specific
-# values come from configs/model/<size>.yaml -> train.finetune.
+# Stage 2: album fine-tuning. An album is a folder data/own/<Album>; every album uses these
+# settings (album_id, title and data.root come from the folder). Change one for a single run with
+# key=value on the command line. Model-size specific values come from configs/model/<size>.yaml.
 seed: 1234
 deterministic: false
 device: auto
 precision: auto
+model: big                       # baseline | big | huge (which pretrained base to fine-tune)
+# base_model: runs/pretrain_big/best.pt
+tuning: drop_a7
+min_gap_bars: 4
 
 data:
+  own: own                       # sub-folders of data/own/<Album>
+  others: [favourites, influences]
+  songs: songs                   # unfinished songs with gaps (generation only)
+  holdout: []                    # files to hold out (D32); every file in <Album>/holdout/ is held out too
   task_mix: {song: 0.3, infill: 0.7}
   context_loss_weight: 0.0       # README §4.3: only the hidden bars are trained
   bars_per_example: 16           # D43: ~1 example per 16 bars of every song, per epoch
@@ -17,27 +26,52 @@ data:
     song_gap_placeholder: 0.1
     guitar_swap: 0.5
     guitar_drop: 0.2
-    # long-range training tasks (docs/LONG_CONTEXT.md, stage 1)
+    # long-range training tasks (README §7)
     far_bars: 32               # "far" = a repeat partner at least this many bars away
     reprise_prob: 0.25         # share of gaps whose bars repeat a far bar (the answer exists, far away)
     bookend_prob: 0.05         # share of gaps in the last 16 bars that repeat the intro
     local_dropout: {prob: 0.10, min_bars: 4, max_bars: 8}   # hide the closest bars on both sides
   section_dropout: 0.3
-  # How the window is filled when a song is longer than it (docs/LONG_CONTEXT.md, stage 1):
+  # How the window is filled when a song is longer than it (README §7):
   # local bars, then bars related to the gap (repeats of the bars next to it and what followed them,
   # intro, outro, same section), the rest is skipped as gap:N.
   context: {related: true, local_fraction: 0.5, related_fraction: 0.35, anchor_bars: 4, edge_bars: 8}
   holdout_gap_lengths: [4, 8]    # fixed validation gaps on the held-out songs (D32, D43)
-  dadagp_val: 64                 # small DadaGP validation set: watches for forgetting
+  pretrain_val: 64                 # small the corpus validation set: watches for forgetting
   val_far: 32                    # extra fixed gaps in the held-out songs that repeat a far bar
 
 finetune:
   # method: full | lora. Default per model size (configs/model: baseline full, big/huge lora);
-  # set it in the album config to override.
+  # override with finetune.method=full on the command line.
   lora: {rank: 16, alpha: 32, dropout: 0.05, train_embeddings: true}
   max_epochs: 10
   evals_per_epoch: 2
   early_stopping_patience: 2     # in epochs (D32)
+
+filters:
+  simple_riff_action: context    # keep | context | drop
+  force_keep: []                 # - {file: own/song_03.gp5, bars: 49-56}
+  force_drop: []
+
+pretrain_mix:                    # similar corpus songs mixed into fine-tuning (D47)
+  enabled: true
+  share: 0.15
+  method: features               # features | embeddings
+  k_nearest: 5
+  top_riffs_per_song: 3
+  max_songs: 1000
+  max_per_artist: 20
+  prefer_tunings: [drop_a7, dropdbl_a7, a_std7, b_std7]
+  always_include_artists: []
+  exclude_artists: []
+
+generation:
+  candidates: 32
+  keep: 10
+  temperature: 1.0
+  top_p: 0.95
+  min_complexity: 0.25
+  max_neighbour_similarity: 0.95
 
 train:
   warmup_steps: 50

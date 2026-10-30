@@ -2,16 +2,16 @@
 
 Two jobs:
 
-1. ``read_gp_meta``: metadata the DadaGP token format does not keep -- time signatures
+1. ``read_gp_meta``: metadata the token format does not keep -- time signatures
    (D23), section markers (D25), track names and the real tuning of every
-   guitar slot. Used for DadaGP songs when the original GP file is available.
+   guitar slot. Used for corpus songs when the original GP file is available.
 
-2. ``encode_own_gp``: turn one of *your* GP5 files into tokens with the official DadaGP
+2. ``encode_own_gp``: turn one of *your* GP5 files into tokens with the official the corpus
    encoder. The encoder rejects 7-string Drop A (A E A D G B E is not one of its four
    tuning shapes), so we use a **tuning bypass**: non-guitar tracks are removed first (so a
    5-string bass in an odd tuning cannot break the encoder), guitar tracks are re-labelled
    as standard 6/7-string for the encoder only, and the real tuning is restored afterwards
-   in our ``tuning:`` token. DadaGP writes string + fret (not pitch), so the tab itself is
+   in our ``tuning:`` token. the corpus writes string + fret (not pitch), so the tab itself is
    unchanged and frets stay physical.
 """
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import guitarpro
 
-from riffgen.gp import dadagp_bridge
+from riffgen.gp import codec
 from riffgen.tokens import tunings as tunings_mod
 
 GUITAR_NAME_RE = re.compile(r"guit|gtr|git\b|rhythm|lead|riff|7[- ]?str", re.I)
@@ -69,14 +69,14 @@ def _headers_meta(song) -> tuple[list[tuple[int, int]], list[str | None]]:
 
 
 def read_gp_meta(path: str | Path, song=None) -> GPMeta:
-    """Metadata of a DadaGP song, with guitar slots assigned exactly like dadagp.py does."""
+    """Metadata of a corpus song, with guitar slots assigned exactly like the encoder does."""
     song = song if song is not None else parse(path)
     ts, markers = _headers_meta(song)
     meta = GPMeta(n_measures=len(song.measureHeaders), ts=ts, markers=markers, tempo=float(song.tempo),
                   title=song.title or "", artist=song.artist or "")
     counters = {"distorted": 0, "clean": 0}
     for ti, track in enumerate(song.tracks):
-        group = dadagp_bridge.instrument_group(track)
+        group = codec.instrument_group(track)
         if group not in counters:
             continue
         slot = counters[group] + (0 if group == "distorted" else 3)
@@ -96,7 +96,7 @@ def _is_guitar(track) -> bool:
     tuning = track_tuning(track)
     if len(tuning) not in (6, 7):
         return False
-    group = dadagp_bridge.instrument_group(track)
+    group = codec.instrument_group(track)
     if group in ("distorted", "clean"):
         return True
     if tuning == tunings_mod.DROP_A7:
@@ -152,7 +152,7 @@ def encode_own_gp(path: str | Path, require_tuning: str | None = tunings_mod.TAR
                 raise SkipSong(f"guitar track '{track.name}' is tuned {tunings_mod.describe(track_tuning(track))} "
                                f"({name}), expected {require_tuning} (D10: tabs are converted by hand, never automatically)")
 
-    # remove exact duplicates first (double-tracked rhythm guitars), then enforce DadaGP's limits
+    # remove exact duplicates first (double-tracked rhythm guitars), then enforce the corpus's limits
     kept, seen = [], {}
     for ti, track in guitars:
         sig = _track_signature(track)
@@ -195,11 +195,11 @@ def encode_own_gp(path: str | Path, require_tuning: str | None = tunings_mod.TAR
                         if b.effect.mixTableChange is not None:
                             b.effect.mixTableChange.instrument = None
             new_tracks.append((ti, track))
-    # keep the original track order: DadaGP numbers distorted0.. in track order
+    # keep the original track order: the corpus numbers distorted0.. in track order
     new_tracks.sort(key=lambda x: x[0])
     song.tracks = [t for _, t in new_tracks]
     try:
-        tokens = dadagp_bridge.encode_song(song)
+        tokens = codec.encode_song(song)
     except Exception as e:
-        raise SkipSong(f"DadaGP encoder failed: {type(e).__name__}: {e}") from e
+        raise SkipSong(f"the encoder failed: {type(e).__name__}: {e}") from e
     return OwnEncoding(tokens=tokens, meta=meta, slot_tunings=slot_tunings, warnings=warnings, removed_tracks=removed)

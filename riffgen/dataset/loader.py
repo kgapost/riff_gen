@@ -34,7 +34,7 @@ from riffgen.utils.seed import derive
 class SourceSpec:
     path: str
     split: str | None = "train"
-    share: float | None = None          # fixed share of examples (e.g. 0.15 DadaGP mix, D47)
+    share: float | None = None          # fixed share of examples (e.g. 0.15 the corpus mix, D47)
     weight: float = 1.0                 # relative weight among sources without a fixed share
     ids: list[str] | None = None        # restrict to these song ids
     bars_per_example: float | str = "auto"

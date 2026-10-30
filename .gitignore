@@ -4,19 +4,17 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# data is never committed (DadaGP licence, own songs)
-data/dadaGP/
-data/DadaGP/
-data/own/
-data/processed/
+# everything under data/ is local (own songs, corpora, downloaded tabs, browser profile, logs):
+# only the downloader code in data/*.py is tracked
+data/*
+!data/*.py
+data/tabs*/
+
+# local copies of the tab collection
+data - Copy/
+tabs backup/
 
 # training and generation outputs
 runs/
 outputs/
 reports/*
-# ...except the Ultimate Guitar shortlists (small); the cache of saved pages stays out
-!reports/ug_shortlist/
-reports/ug_shortlist/cache/
-
-# third-party clone, no licence: reference only (docs/UGDownloader_summary.md)
-UGDownloader/
