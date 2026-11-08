@@ -50,7 +50,7 @@ techniques and tuning. Files are read and written with PyGuitarPro; GP3 and
 GP4 are read too, and GP6/GP7 files are converted with `data/convert.py`
 (see [Collecting tabs](#collecting-tabs)). The model reads drums and bass as
 context. In training they are dropped 15 % of the time each, so the model
-also works on guitar-only songs. Up to three guitar tracks are kept;
+also works on guitar-only songs. Up to four guitar tracks are kept (`G_SLOTS`);
 double-tracked copies are kept once. Each candidate is the whole song: the
 new bars are spliced into your original file, so everything else stays
 exactly as written. The song you fill must have its guitars in 7-string
@@ -94,10 +94,10 @@ beat (drums)  = d:16 dr:kick dr:hat
   as a target.
 
 The vocabulary is about 700 tokens; labels are added at its end, so music
-tokens keep their ids. On a random 300-tab sample, 96 % of the tabs were
-kept (the rest have no guitar track). That sample averaged 70 tokens per bar
-(90th percentile 129) and 111 bars per song, which puts the whole corpus at
-roughly 450 M tokens per epoch.
+tokens keep their ids. Over the whole collection (61,123 tabs) 93.9 % are
+kept (the rest have no guitar track, or one bar too dense to encode). They
+average 68 tokens per bar and 111 bars per song, which puts the corpus at
+431 M tokens per epoch.
 
 Why this encoding: bar-major order with the tracks one after another inside
 each bar is what MMM and NotaGen's interleaved ABC use for multi-track
@@ -198,11 +198,28 @@ attention.
 **8. Labels.** Each song gets labels from its folder:
 
 - `genre:<folder>` for `tabs - <genre>` (for example `genre:prog`,
-  `genre:doom_stoner_sludge`);
+  `genre:doom_stoner_sludge`); a folder not listed in `GENRES` becomes
+  `genre:other`;
 - `src:early` for the early-years folders (`generic`, `exercises`,
   `metal generic`; edit `EARLY` in riff.py);
-- `album:<id>` for `tabs - CS` and for your own songs in `data/__<album>/`,
-  which also get `src:own`.
+- `album:<id>` plus `src:own` for your own songs in
+  `data/__<album>/own/`, and `album:<id>` plus `src:insp` for the tabs you
+  assign to that album as inspiration, in `data/__<album>/insp/`.
+
+The two sources of an album are a deliberate distinction: the model may copy
+from `src:own` or come very close to it, but may only be informed by
+`src:insp`, never reproduce it (§15). A file put
+straight in `data/__<album>/` with no subfolder is read as `insp`, the safe
+side, and counted in `prepare`'s report.
+
+The label vocabulary is built from the constants in riff.py (`ALBUMS`,
+`GENRES`, `SOURCES`) and not from whatever labels a corpus happens to hold,
+so every album is registered while its folder is still empty and preparing
+the corpus again always yields the same token list. That is what keeps
+checkpoints loadable as the album folders fill: `--init` refuses a
+checkpoint trained on another vocabulary. Adding a name to those constants
+renumbers the label ids and costs a fresh pretrain, so `prepare` stops if it
+finds an album folder that is not in `ALBUMS`.
 
 The model reads four label slots (genre, album, source, relation). In
 training, each label is dropped 15 % of the time (MusicGen and Diff-Symbo
@@ -291,7 +308,7 @@ skipped, so a stopped grid continues.
 `--lora 16` freezes the model and adds rank-16 updates to every attention
 and MLP projection; the token and label embeddings train too. Add replay
 from the album's genres with `--focus`, and keep the checkpoint with the
-lowest loss on the held-out songs (`data/__<album>/holdout/` goes to
+lowest loss on the held-out songs (`data/__<album>/own/holdout/` goes to
 validation).
 
 **14. Candidates.** Each candidate is sampled with temperature and top-p
@@ -302,8 +319,16 @@ are ranked by mean log-probability. The top `--keep` go to
 
 **15. Plagiarism.** Planned for riff.py: winnowed 8–16-note fingerprints at
 three levels (exact tab, transposed, rhythm), weighted by rarity, with
-versions of one song counting once. Until then, `--neg` and the copy reject
-keep plain copies out, but quotes of other songs are not checked.
+versions of one song counting once. The thresholds are per source, because
+"not mine" is not one thing: `src:own` is only reported (copying your own
+song is the point), `src:insp` is relaxed — a longer match is needed to
+count, and transposed or rhythm-only matches are ignored, since a tab chosen
+as an influence is meant to show through — and the rest of the corpus is
+strict. Which tier applies is decided per album by the folders, so the same
+tab is `insp` when filling the album it was assigned to and plain corpus
+material anywhere else. `red` rejects a candidate, `yellow` keeps it and
+lists it with its source. Until then, `--neg` and the copy reject keep plain
+copies out, but quotes of other songs are not checked.
 
 **16. Playability.** Enforced while writing:
 
@@ -425,9 +450,16 @@ changes the originals.
 
 - Repeats: `repeatClose` counts *extra* passes, and `repeatAlternative` is a
   bit mask (3 = endings 1 and 2).
-- Duplicates: the same tab in two folders is kept once (content hash), and
-  at most 3 versions of one song are kept (`--max-versions`). Versions form
-  a family that stays in one split.
+- Duplicates: the same tab is kept once per folder, on purpose - copying a
+  file into an album folder is how a tab is assigned, and the folders are
+  the only truth. So at most 3 versions of one song are kept
+  (`--max-versions`) *per top-level folder*, otherwise that limit would drop
+  the very copy carrying the album label. Versions form a family that stays
+  in one split. A copy still trains, since being in two folders is a
+  deliberate reweighting, but it supplies no validation or test gaps, where
+  it would only score the same bars twice; which copy counts as the original
+  is settled by sorted path after encoding, so it does not depend on the
+  order the workers finish in.
 - Guitar or not: a 6–7 string track with a guitar program or a guitar-like
   name. A bass is found by program, name, 4–5 strings or a low tuning.
 - A bar too dense for 384 tokens loses its drums, then its bass; a song
@@ -477,8 +509,10 @@ own account, which is what is at risk, and a daily quota may end long runs.
 
 ## Before you start
 
-- Put your own songs in `data/__<album>/` and 1–2 of them per album in
-  `data/__<album>/holdout/`.
+- Put your own songs in `data/__<album>/own/` and 1–2 of them per album in
+  `data/__<album>/own/holdout/`; put the tabs you want that album to be
+  inspired by in `data/__<album>/insp/`. The album folder must be named
+  after an album in `ALBUMS`.
 - Mark gaps with 5 or more empty measures in all guitar tracks, with the
   right time signatures. A marker such as "Bridge" helps.
 - Add section markers to your own songs where you can.

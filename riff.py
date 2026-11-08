@@ -51,13 +51,30 @@ DROP_A = (64, 59, 55, 50, 45, 40, 33)           # 7-string Drop A, string 1 (hig
 FRETS = 25                                      # frets 0..24
 BASS = (24, 67)                                 # bass pitches kept (MIDI)
 TS_DENS = (1, 2, 4, 8, 16, 32)
+G_SLOTS = 4                                     # guitar tracks kept per song (README §2)
 MAX_BAR = 384                                   # tokens in one bar (all tracks)
 FLAG = 0x8000                                   # set on every stored token the model writes (guitar parts, end of bar)
 MASK = 0x7FFF
 
-# Labels come from the folder a tab is in (README §8). Edit these sets to match your folders.
+# Labels come from the folder a tab is in (README §8). Edit these to match your folders.
+#
+# These constants ARE the label vocabulary: make_tokens builds the lbl: tokens from them and never from whatever
+# labels one corpus happens to hold. That is what makes the token list reproducible - preparing the corpus again
+# after writing a new riff, filling an album folder or adding a genre gives back the same list, so checkpoints
+# stay loadable (train_run exits when --init was trained on another vocabulary). Adding a name here renumbers the
+# label ids and invalidates existing checkpoints, so the lists are written out in full ahead of being filled:
+# every album is registered while its folder is still empty, and GENRE_OTHER absorbs any folder not listed, so a
+# new genre folder costs nothing. Music token ids never depend on any of this - labels go last.
 EARLY = {"generic", "exercises", "metal_generic"}       # the early years: learned from, steered away from
-ALBUMS = {"cs", "caffeine", "waves", "vc1", "vc2", "potha", "tme", "maphorion", "omni"}
+ALBUMS = ("cs", "caffeine", "waves", "vc1", "vc2", "potha", "tme", "maphorion", "omni")
+GENRES = ("acoustic", "blues_soul_rnb", "classical", "doom_stoner_sludge", "electronic", "ethnic", "experimental",
+          "funk", "grunge", "jazz", "metal_groove", "metal_melodic_death", "metal_nu", "metal_thrash",
+          "metal_xtreme", "pop", "prog", "punk", "rock", "shred", "soundtracks")
+GENRE_OTHER = "other"                                   # any genre folder not listed above
+SOURCES = ("own", "insp", "early")                      # own: mine, the model may copy it. insp: chosen as
+#                                                         inspiration, the model may learn from it but not
+#                                                         reproduce it (configs/plagiarism.yaml tiers)
+ALBUM_SUBS = {"own": "own", "insp": "insp"}             # the subfolder of __<album>/ that sets src
 
 K_DUR, K_NOTE, K_FX, K_TRK, K_BASS, K_DRUM, K_TS, K_SEC, K_TREM = range(1, 10)
 
@@ -74,14 +91,21 @@ def dur_ticks(v: int, dot: bool, tup: int) -> int:
 DUR_TABLE = {dur_name(v, d, u): (v, d, u) for v in DUR_VALUES for d in (False, True) for u in TUPLETS}
 
 
-def make_tokens(labels=()) -> list[str]:
+def label_tokens() -> list[str]:
+    """The whole label vocabulary, from the constants above: the same list whatever a given corpus contains."""
+    return [f"lbl:rel:{r}" for r in RELATIONS] + sorted(
+        [f"lbl:album:{a}" for a in ALBUMS] + [f"lbl:genre:{g}" for g in (*GENRES, GENRE_OTHER)] +
+        [f"lbl:src:{s}" for s in SOURCES])
+
+
+def make_tokens() -> list[str]:
     t = ["<pad>", "<bos>", "<pre>", "<suf>", "<mid>", "<eob>", "<none>", "<unk_bar>", "<gap_start>"]
     t += [f"tempo:{i}" for i in range(20)] + [f"len:{i}" for i in range(1, 65)] + [f"gap:{i}" for i in range(1, 65)]
     t += [f"ts:{n}/{d}" for d in TS_DENS for n in range(1, 33)] + [f"sec:{s}" for s in SECTIONS]
-    t += ["trk:dr", "trk:bs", "trk:g0", "trk:g1", "trk:g2"] + list(DUR_TABLE) + ["trem"]
+    t += ["trk:dr", "trk:bs"] + [f"trk:g{i}" for i in range(G_SLOTS)] + list(DUR_TABLE) + ["trem"]
     t += [f"n:{s}:{f}" for s in range(1, 8) for f in range(FRETS)] + [f"fx:{e}" for e in EFFECTS]
     t += [f"bp:{p}" for p in range(BASS[0], BASS[1] + 1)] + [f"dr:{d}" for d in DRUMS]
-    return t + [f"lbl:rel:{r}" for r in RELATIONS] + [f"lbl:{x}" for x in labels]   # labels last: music ids never move
+    return t + label_tokens()                           # labels last: music ids never move
 
 
 class Vocab:
@@ -116,7 +140,9 @@ class Vocab:
         self.min_dur = self.ticks_asc[0]
         self.trem = self.id["trem"]
         self.fx = {e: self.id[f"fx:{e}"] for e in EFFECTS}
-        self.trk_g = [self.id[f"trk:g{i}"] for i in range(3)]
+        self.trk_g = []                                 # as many guitar slots as this vocabulary holds, not as
+        while f"trk:g{len(self.trk_g)}" in self.id:      # many as G_SLOTS: a corpus keeps the slots it was built
+            self.trk_g.append(self.id[f"trk:g{len(self.trk_g)}"])       # with, and its checkpoints with it
         self.trk_dr, self.trk_bs = self.id["trk:dr"], self.id["trk:bs"]
         self.notes = np.array([[self.id[f"n:{s}:{f}"] for f in range(FRETS)] for s in range(1, 8)])
         self.shift = {}
@@ -345,7 +371,7 @@ def encode_song(song, V: Vocab, max_bars: int = 2048) -> dict:
     for i in sorted((i for i, k in enumerate(kinds) if k == "guitar" and counts[i]), key=lambda i: -counts[i]):
         sig = hash(tuple((b.start, n.string, n.value) for m in tracks[i].measures for v in m.voices
                          for b in v.beats for n in b.notes))
-        if sig not in seen and len(guitars) < 3:            # doubled tracks are kept once
+        if sig not in seen and len(guitars) < len(V.trk_g):  # doubled tracks are kept once
             seen.add(sig)
             guitars.append(i)
     guitars.sort()
@@ -377,14 +403,19 @@ def encode_song(song, V: Vocab, max_bars: int = 2048) -> dict:
         if sec >= 0:
             head.append(V.id[f"sec:{SECTIONS[sec]}"])
         ctx = [[V.id[f"trk:{name}"]] + part(ti, kind, plan, m, L)[0] for name, ti, kind, plan in ctx_parts if ti is not None]
-        g, notes = [], []
+        gparts, gnotes = [], []
         for slot, (ti, plan) in enumerate(zip(guitars, plans)):
             t, n = part(ti, "guitar", plan, m, L)
-            g += [V.trk_g[slot]] + t
-            notes += n
-        g.append(V.eob)
-        while ctx and len(head) + sum(map(len, ctx)) + len(g) > MAX_BAR:
-            ctx.pop(0)                                       # a too dense bar loses its drums, then its bass
+            gparts.append([V.trk_g[slot]] + t)
+            gnotes.append(n)
+        room = lambda: len(head) + sum(map(len, ctx)) + sum(map(len, gparts)) + 1   # noqa: E731 - +1: <eob>
+        while ctx and room() > MAX_BAR:
+            ctx.pop(0)                                       # a too dense bar loses its drums, then its bass,
+        while len(gparts) > 1 and room() > MAX_BAR:
+            gparts.pop()                                     # then its last guitar, rather than the whole song
+            gnotes.pop()
+        g = [x for p in gparts for x in p] + [V.eob]
+        notes = [x for n in gnotes for x in n]
         if len(head) + len(g) > MAX_BAR:
             raise Skip("bar too dense")
         bar = np.concatenate([np.array(head + [x for c in ctx for x in c], np.uint16), np.array(g, np.uint16) | FLAG])
@@ -415,16 +446,36 @@ def family(path: Path) -> str:
     return slug(re.sub(r"\([^)]*\)|\[[^]]*\]", "", s))
 
 
+def album_src(rel) -> str:
+    """own or insp for a path under __<album>/; insp when the subfolder is missing or unrecognised."""
+    parts = Path(rel).parts if not isinstance(rel, (list, tuple)) else rel
+    return ALBUM_SUBS.get(slug(parts[1]), "insp") if len(parts) > 2 else "insp"
+
+
 def labels_of(rel: Path) -> dict:
-    """Folder -> labels: tabs - <genre> -> genre, the early folders -> src:early, tabs - <album> -> album,
-    __<album> (your own songs) -> album + src:own."""
+    """Folder -> labels (README §8). The folders are the whole truth, so the same tab can sit in a genre folder
+    and in any number of album folders and is labelled once per copy:
+
+        __<album>/own/...    album + src:own    mine - the model may copy it or come very close to it
+        __<album>/insp/...   album + src:insp   chosen as inspiration - it may inform, not be reproduced
+        tabs - <genre>/...   genre              (an unlisted folder becomes genre:other)
+        the EARLY folders    src:early          the early years: learned from, steered away from
+
+    A file sitting straight in __<album>/ with no own/insp subfolder is read as insp, the safe side of that
+    distinction; cmd_prepare counts those separately (no_subfolder) so they do not pass unnoticed."""
     top = rel.parts[0]
     if top.startswith("__"):
-        return {"album": slug(top[2:]), "src": "own"}
+        return {"album": slug(top[2:]), "src": album_src(rel)}
     name = slug(top[len("tabs - "):] if top.lower().startswith("tabs - ") else top)
     if name in EARLY:
         return {"src": "early"}
-    return {"album": name} if name in ALBUMS else {"genre": name}
+    return {"genre": name if name in GENRES else GENRE_OTHER}
+
+
+def label_match(labels: dict, spec: str) -> bool:
+    """``src:own`` matches that key and value; ``album:*`` matches any value of that key."""
+    k, _, v = spec.partition(":")
+    return k in labels and (v in ("*", "") or labels[k] == v)
 
 
 _BASE: Vocab | None = None
@@ -455,11 +506,42 @@ def cmd_prepare(a) -> None:
                      and (d.name.lower().startswith("tabs - ") or d.name.startswith("__")))
     files = [p for d in folders for p in sorted(d.rglob("*")) if p.suffix.lower() in (".gp3", ".gp4", ".gp5")
              and not {"__erroneous", "__8string"} & set(p.parts)]
+    # An album folder whose name is not registered in ALBUMS would label its tabs with a token that does not
+    # exist, and Vocab.slots would quietly fall back to <none>: the tabs would train with no album label at all.
+    # A misspelt folder is far likelier than a deliberate new album, so it stops here rather than an hour later.
+    if stray := sorted({d.name for d in folders if d.name.startswith("__") and slug(d.name[2:]) not in ALBUMS}):
+        sys.exit(f"album folder(s) not in ALBUMS: {', '.join(stray)}\n"
+                 f"known albums: {', '.join(ALBUMS)}\n"
+                 f"fix the folder name, or add the album to ALBUMS in riff.py - but adding one renumbers the "
+                 f"label ids, so every existing checkpoint has to be pretrained again.")
+    # The holdout songs are yours, so they belong under own/: __<album>/holdout/ would read as src:insp and the
+    # model would be told it may not copy your own song. Worth stopping for - the mistake is invisible otherwise.
+    if bad := sorted({p.relative_to(src).parts[0] for p in files
+                      if p.relative_to(src).parts[0].startswith("__")
+                      and len(p.relative_to(src).parts) > 2 and slug(p.relative_to(src).parts[1]) == "holdout"}):
+        sys.exit(f"holdout songs directly under {', '.join(bad)}: move them to <album>/own/holdout/, "
+                 f"otherwise they are labelled src:insp (inspiration) instead of src:own.")
+    excl = [s.strip() for s in a.exclude.split(",") if s.strip()]
+    if excl:
+        kept = [p for p in files if not any(label_match(labels_of(p.relative_to(src)), s) for s in excl)]
+        log(f"excluded {len(files) - len(kept)} files matching {', '.join(excl)}")
+        files = kept
+    if a.frac < 1.0:                                    # a fraction of each folder, before the train/test split
+        by: dict[str, list] = {}
+        for p in files:
+            by.setdefault(p.relative_to(src).parts[0], []).append(p)
+        sampled = []
+        for folder, ps in sorted(by.items()):           # seeded per folder: one folder changing leaves the rest alone
+            r = rng_for(a.seed, int(hashlib.md5(folder.encode()).hexdigest()[:8], 16))
+            n = max(1, round(len(ps) * a.frac))
+            sampled += [ps[i] for i in sorted(r.choice(len(ps), n, replace=False).tolist())]
+        log(f"sampled {len(sampled)}/{len(files)} files ({a.frac:.0%} of each of the {len(by)} folders)")
+        files = sampled
     if a.limit:
         keep = set(np.random.default_rng(a.seed).choice(len(files), min(a.limit, len(files)), replace=False).tolist())
         files = [p for i, p in enumerate(files) if i in keep]
     log(f"{len(files)} Guitar Pro files in {len(folders)} folders")
-    songs, skips, digests, fams = [], Counter(), set(), Counter()
+    songs, skips, notes, fams = [], Counter(), Counter(), Counter()
     lens, feats = [], {n: [] for n in ("hash", "pc", "on", "low", "gn", "sec")}
     jobs = [(str(p), str(src)) for p in files]
     with open(out / "tokens.bin", "wb") as fh, mp.Pool(a.workers) as pool:
@@ -470,22 +552,41 @@ def cmd_prepare(a) -> None:
             if status == "skip":
                 skips[r] += 1
                 continue
-            if r["digest"] in digests:                  # the same tab twice (also across genre folders)
-                skips["duplicate"] += 1
-                continue
-            if fams[r["family"]] >= a.max_versions:
+            # The same tab in several folders is kept, once per folder: copying a file into an album folder is
+            # how a tab is assigned, and the folders are the truth. So versions are counted per top-level folder
+            # - otherwise --max-versions, meant to stop one popular song flooding a genre, would drop the copy
+            # that carries the album label. A copy is marked (dup) rather than dropped: it trains, since being in
+            # two folders is a deliberate reweighting, but it supplies no validation or test gaps, where it would
+            # only score the same bars twice.
+            parts = r["file"].split("/")
+            if fams[parts[0], r["family"]] >= a.max_versions:
                 skips["more versions of one song"] += 1
                 continue
-            digests.add(r["digest"])
-            fams[r["family"]] += 1
+            fams[parts[0], r["family"]] += 1
+            if parts[0].startswith("__") and (len(parts) < 3 or slug(parts[1]) not in ALBUM_SUBS):
+                notes["album files with no own/insp subfolder (read as insp)"] += 1
             fh.write(r["tokens"].astype(np.uint16).tobytes())
             lens.append(r["lens"])
             for k in feats:
                 feats[k].append(r["feats"][k])
             nb = len(r["lens"])
             songs.append({k: r[k] for k in ("file", "family", "labels", "tempo")} |
-                         {"bar0": bar0, "nb": nb, "tokens": int(r["lens"].sum()), "holdout": r["holdout"]})
+                         {"bar0": bar0, "nb": nb, "tokens": int(r["lens"].sum()), "holdout": r["holdout"],
+                          "_digest": r["digest"]})
             bar0 += nb
+    # Which copy of a tab counts as the original is settled here and not in the loop above: the workers finish in
+    # whatever order they finish in, so marking copies as they arrived would hand the fixed validation gaps to a
+    # different copy on every run. The order is fixed and prefers the plain genre copy, so a tab assigned to an
+    # album is scored as corpus material and the album sets stay out of the evaluation entirely.
+    seen, copies = {}, Counter()
+    for s in sorted(songs, key=lambda s: (s["file"].startswith("__"), s["file"])):
+        d = s.pop("_digest")
+        copies[d] += 1
+        if d in seen:
+            s["dup"] = True
+        seen[d] = True
+    if n := sum(v - 1 for v in copies.values()):
+        notes["copies of a tab in another folder"] = n
     lens = np.concatenate(lens)
     np.save(out / "bar_off.npy", np.concatenate([[0], np.cumsum(lens, dtype=np.int64)]))
     for k, v in feats.items():
@@ -496,16 +597,18 @@ def cmd_prepare(a) -> None:
     gaps = fixed_gaps(songs, {k: np.concatenate(v) for k, v in feats.items()}, a.seed)
     labels = sorted({f"{k}:{v}" for s in songs for k, v in s["labels"].items()})
     train_tok = sum(s["tokens"] for s in songs if s["split"] == "train")
-    stats = {"files": len(files), "songs": len(songs), "skipped": dict(skips), "bars": int(len(lens)),
+    stats = {"files": len(files), "songs": len(songs), "skipped": dict(skips), "notes": dict(notes),
+             "copied_most": max(copies.values(), default=0), "bars": int(len(lens)),
              "tokens": int(lens.sum()), "train_tokens": int(train_tok), "tokens_per_bar": float(lens.mean()),
              "tokens_per_bar_p90": float(np.percentile(lens, 90)), "bars_per_song": float(len(lens) / max(len(songs), 1)),
              "splits": dict(Counter(s["split"] for s in songs)),
              "labels": dict(Counter(f"{k}:{v}" for s in songs for k, v in s["labels"].items()))}
-    (out / "meta.json").write_text(json.dumps({"tokens": make_tokens(labels), "labels": labels, "stats": stats,
+    (out / "meta.json").write_text(json.dumps({"tokens": make_tokens(), "labels": labels, "stats": stats,
                                                "songs": songs, "gaps": gaps}), encoding="utf-8")
     (out / "stats.json").write_text(json.dumps(stats, indent=1), encoding="utf-8")
     log(f"{len(songs)} songs, {stats['tokens'] / 1e6:.1f}M tokens ({stats['tokens_per_bar']:.0f}/bar), "
-        f"{len(gaps)} fixed val/test gaps -> {out}\nskipped: {dict(skips)}")
+        f"{len(gaps)} fixed val/test gaps -> {out}\nskipped: {dict(skips)}"
+        + (f"\nnote: {dict(notes)}" if notes else ""))
 
 
 def fixed_gaps(songs, feats, seed, per_split=3000) -> list[dict]:
@@ -513,8 +616,8 @@ def fixed_gaps(songs, feats, seed, per_split=3000) -> list[dict]:
     out = Counter()
     gaps = []
     for i, s in enumerate(songs):
-        if s["split"] == "train" or out[s["split"]] >= per_split or s["nb"] < 12:
-            continue
+        if s["split"] == "train" or out[s["split"]] >= per_split or s["nb"] < 12 or s.get("dup"):
+            continue                                    # a copy of a tab in another folder scores the same bars
         rng = rng_for(seed, i)
         gn = feats["gn"][s["bar0"]:s["bar0"] + s["nb"]]
         for _ in range(2):
@@ -564,6 +667,7 @@ class Corpus:
         self.vocab, self.labels, self.stats = Vocab(meta["tokens"]), meta["labels"], meta["stats"]
         self.songs, self.gaps = meta["songs"], meta["gaps"]
         self._mm = None
+        self.cache = {}                                  # derived sets that cost more than one evaluation
 
     def _open(self):
         if self._mm is None:
@@ -582,7 +686,7 @@ class Corpus:
                         s["labels"], s["tempo"])
 
     def __getstate__(self):
-        return self.__dict__ | {"_mm": None}
+        return self.__dict__ | {"_mm": None, "cache": {}}
 
 
 # ============================================================================ training examples
@@ -666,11 +770,11 @@ def augment(bars, V, rng, guitar_drop=0.2, info=None) -> list[np.ndarray]:
     for trk in (V.trk_dr, V.trk_bs):
         if rng.random() < 0.15:
             drop |= seg_head == trk
-    present = [g for g in range(3) if (seg_head == V.trk_g[g]).any()]
+    present = [g for g in range(len(V.trk_g)) if (seg_head == V.trk_g[g]).any()]
     if len(present) >= 2 and rng.random() < guitar_drop:
         g = int(rng.choice(present))
         drop |= seg_head == V.trk_g[g]
-        for h in range(g + 1, 3):
+        for h in range(g + 1, len(V.trk_g)):
             ids[ids == V.trk_g[h]] = V.trk_g[h - 1]
     keep = ~drop[seg]
     if rng.random() < 0.3:
@@ -1059,14 +1163,24 @@ class Stack(nn.Module):
         return self.norm(x)
 
 
-def token_loss(logits, tgt, w, kind):
-    """Weighted cross-entropy sum and per-class sums (README §19: rhythm usually gets easier than pitch)."""
-    nll = F.cross_entropy(logits.float().flatten(0, 1), tgt.flatten(), reduction="none").view_as(tgt)
+def token_loss(logits, tgt, w, kind, smooth=0.0, focal=0.0):
+    """Weighted cross-entropy sum and per-class sums (README §19: rhythm usually gets easier than pitch).
+    ``smooth`` label-smooths and ``focal`` rescales each token by (1-p)^focal, which spends the step on the
+    tokens the model still gets wrong - the opposite of smoothing, for a corpus this predictable (README §12).
+    Both change what is returned for the backward pass only: the reported "loss" stays the plain cross-entropy,
+    so runs with different smoothing or focusing remain comparable (the grid ranks on it). The modulating
+    factor is detached, so focusing reweights the plain gradient instead of adding a term of its own."""
+    lg = logits.float().flatten(0, 1)
+    nll = F.cross_entropy(lg, tgt.flatten(), reduction="none").view_as(tgt)
+    back = (nll if not smooth else
+            F.cross_entropy(lg, tgt.flatten(), reduction="none", label_smoothing=smooth).view_as(tgt))
+    if focal:
+        back = back * (1.0 - torch.exp(-nll.detach())).pow(focal)
     k = kind[tgt]
     st = {"loss": (nll * w).sum(), "w": w.sum(), "correct": ((logits.argmax(-1) == tgt).float() * w).sum()}
     for name, sel in (("rhythm", k == K_DUR), ("pitch", k == K_NOTE), ("technique", (k == K_FX) | (k == K_TREM))):
         st[f"nll_{name}"], st[f"w_{name}"] = (nll * w * sel).sum(), (w * sel).sum()
-    return st["loss"], {n: v.detach() for n, v in st.items()}
+    return (back * w).sum(), {n: v.detach() for n, v in st.items()}
 
 
 class FlatModel(nn.Module):
@@ -1084,7 +1198,8 @@ class FlatModel(nn.Module):
         return h @ self.emb.weight.T
 
     def loss(self, b):
-        return token_loss(self(b["ids"][:, :-1]), b["ids"][:, 1:], b["w"], self.kind)
+        return token_loss(self(b["ids"][:, :-1]), b["ids"][:, 1:], b["w"], self.kind,
+                          self.cfg.get("smooth", 0.0), self.cfg.get("focal", 0.0))
 
     def prefill(self, ids):
         kv = []
@@ -1183,13 +1298,14 @@ class HierModel(nn.Module):
         total, stats = 0.0, {}
         for ti, inp, tgt, w in b["loc"]:
             mem = self.memory(mem_ids[ti], valid[ti]) if self.K else (None, None)
-            l, st = token_loss(self.local(cond[ti], inp, *mem), tgt, w, self.kind)
+            l, st = token_loss(self.local(cond[ti], inp, *mem), tgt, w, self.kind,
+                               self.cfg.get("smooth", 0.0), self.cfg.get("focal", 0.0))
             total = total + l
             for k, v in st.items():
                 stats[k] = stats.get(k, 0) + v
         if aux:
             a = sum(aux.values())
-            total = total + 0.1 * a * stats["w"]
+            total = total + self.cfg.get("aux", 0.1) * a * stats["w"]
             stats.update({f"aux_{k}": v.detach() * stats["w"] for k, v in aux.items()})
         return total, stats
 
@@ -1580,8 +1696,10 @@ def load_ckpt(path, dev):
 
 
 def train_run(cfg, data, run, lr, batch_tokens, epochs, eval_every=0.5, budget=None, resume=False, init=None,
-              lora=0, focus=None, workers=4, seed=1234, eval_gaps=400, gen_gaps=8, dev=None) -> dict:
-    """Train one model; evaluate every ``eval_every`` epochs (and at the end); keep best.pt and last.pt."""
+              lora=0, focus=None, workers=4, seed=1234, eval_gaps=400, gen_gaps=8, dev=None, keep_ckpt=True) -> dict:
+    """Train one model; evaluate every ``eval_every`` epochs (and at the end); keep best.pt and last.pt.
+    ``keep_ckpt=False`` only reports the losses (the grid search needs no weights, and writing last.pt with the
+    optimiser state at every evaluation would cost more than the short run itself)."""
     dev = dev or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run = Path(run)
     run.mkdir(parents=True, exist_ok=True)
@@ -1611,14 +1729,18 @@ def train_run(cfg, data, run, lr, batch_tokens, epochs, eval_every=0.5, budget=N
     ep_tok = epoch_tokens(c, focus)
     total = budget or epochs * ep_tok
     every = eval_every * ep_tok if eval_every else total
+    # the accumulation loop runs micro-batches until it reaches batch_tokens, so a micro-batch bigger than the step
+    # would silently train at the micro size instead: split the step into equal micro-batches that fit the model's
+    micro = max(4096, -(-batch_tokens // max(1, math.ceil(batch_tokens / cfg["micro_tokens"]))))
     info = {"cfg": cfg, "lr": lr, "batch_tokens": batch_tokens, "epochs": epochs, "budget": budget, "seed": seed,
             "params": n_params(model), "params_total": n_params(model, True), "epoch_tokens": ep_tok, "lora": lora,
-            "focus": focus, "data": str(data)}
+            "focus": focus, "data": str(data), "micro_tokens": micro}
     (run / "run_info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
     log(f"{cfg['name']}: {info['params'] / 1e6:.1f}M parameters ({info['params_total'] / 1e6:.1f}M with embeddings), "
-        f"lr {lr:.2e}, {batch_tokens} tokens/step, {total / 1e6:.0f}M tokens on {dev}")
+        f"lr {lr:.2e}, {batch_tokens} tokens/step ({-(-batch_tokens // micro)} x {micro}), "
+        f"{total / 1e6:.0f}M tokens on {dev}")
     loader = torch.utils.data.DataLoader(
-        Stream(data, cfg, cfg["micro_tokens"], seed, start["epoch"], focus), batch_size=None, num_workers=workers,
+        Stream(data, cfg, micro, seed, start["epoch"], focus), batch_size=None, num_workers=workers,
         persistent_workers=workers > 0, prefetch_factor=4 if workers else None, pin_memory=dev.type == "cuda")
     it = iter(loader)
     st, logf = dict(start), open(run / "metrics.jsonl", "a", encoding="utf-8")
@@ -1664,14 +1786,19 @@ def train_run(cfg, data, run, lr, batch_tokens, epochs, eval_every=0.5, budget=N
             logf.write(json.dumps({"step": st["step"], "tokens": st["seen"], "eval": last}) + "\n")
             logf.flush()
             log("eval " + " ".join(f"{k} {v:.4f}" for k, v in last.items()))
-            ck = {"cfg": cfg, "tokens": V.tokens, "model": model.state_dict(), "lora": lora, "state": st}
-            if last["loss"] < st["best"]:
-                st["best"] = last["loss"]
-                save_ckpt(run / "best.pt", ck)
-            save_ckpt(run / "last.pt", ck | {"opt": opt.state_dict()})
+            best = last["loss"] < st["best"]
+            st["best"] = min(st["best"], last["loss"])
+            if best:
+                st["best_eval"] = last                   # the whole evaluation at the best step, not just its loss
+            if keep_ckpt:
+                ck = {"cfg": cfg, "tokens": V.tokens, "model": model.state_dict(), "lora": lora, "state": st}
+                if best:
+                    save_ckpt(run / "best.pt", ck)
+                save_ckpt(run / "last.pt", ck | {"opt": opt.state_dict()})
             model.train()
     logf.close()
-    return {"best": st["best"], "last": last, "tokens": st["seen"]}
+    return {"best": st["best"], "last": last, "best_eval": st.get("best_eval", last), "tokens": st["seen"],
+            "tokens_per_step": st["seen"] / max(st["step"], 1), "micro_tokens": micro}
 
 
 def summarise(acc: dict) -> dict:
@@ -1707,30 +1834,128 @@ def bar_feats(bar, V):
     return pc, on, n
 
 
+CMP_CTX = 4096                  # the flat window: the comparable subset is defined against it and never against
+                                # the model being scored, so every architecture is scored on the same tokens
+
+
+def gap_repeats(view: SongView, s: int, L: int) -> bool:
+    """Does any bar of the gap occur again outside it? A model that finds such a bar in its context has not
+    written anything, and the flat window carries those bars as plain tokens while the hierarchical ones see
+    only one vector per bar, so these gaps measure the architecture's reach rather than its writing."""
+    outside = {int(h) for i, h in enumerate(view.f["hash"]) if view.f["gn"][i] and not s <= i < s + L}
+    return any(int(view.f["hash"][i]) in outside for i in range(s, s + L) if view.f["gn"][i])
+
+
+def comparable_gaps(c: Corpus, split="val") -> list[tuple[int, dict]]:
+    """The fixed gaps every architecture can be ranked on (README §19): no bar of the gap occurs anywhere else
+    in the song, so none of them can be copied from the context, and the gap is short enough that
+    ``flat_example`` does not have to shorten it - on these the flat and the hierarchical builders weight an
+    identical set of target tokens. Cached on the corpus: the set is a property of the corpus, not of a run."""
+    key = f"cmp_{split}"
+    if key not in c.cache:
+        out = []
+        for j, g in enumerate(g for g in c.gaps if g["split"] == split):
+            view, s, L = c.view(g["song"]), g["start"], g["len"]
+            if view.lens[s:s + L].sum() <= CMP_CTX // 2 and not gap_repeats(view, s, L):
+                out.append((j, g))
+        c.cache[key] = out
+    return c.cache[key]
+
+
 @torch.no_grad()
-def evaluate(model, c: Corpus, cfg, split="val", max_gaps=400, gen_gaps=8, out=None) -> dict:
-    """README §19: loss on the fixed gaps (all, rhythm, pitch, technique), and for a few gaps, written candidates:
-    pitch-class and rhythm similarity to the real bars, copies of a context bar, note density."""
-    model.eval()
-    dev = next(model.parameters()).device
-    V, gaps = c.vocab, [g for g in c.gaps if g["split"] == split][:max_gaps]
-    acc, buf, n = {}, [], 0
-    for i, g in enumerate(gaps + [None]):
-        if g is not None:
-            view, rng = c.view(g["song"]), rng_for(0, i)
+def gap_loss(model, c: Corpus, cfg, gaps, dev) -> dict:
+    """Summed loss statistics over the given fixed gaps. The context has weight 0 at evaluation, so these
+    cover the gaps' guitar tokens alone. ``gaps`` is a list of (index, gap); the index only labels the gap,
+    because with the target given and ``train=False`` neither example builder draws from its generator."""
+    V, acc, buf, n = c.vocab, {}, [], 0
+    for item in list(gaps) + [None]:
+        if item is not None:
+            j, g = item
+            view, rng = c.view(g["song"]), rng_for(0, j)
             tgt = (g["start"], g["len"])
             ex = (flat_example(V, view, rng, cfg["ctx"], tgt, train=False) if cfg["kind"] == "flat" else
                   hier_example(V, view, rng, cfg.get("max_bars_infer", 2 * cfg["max_bars"]), [tgt], train=False))
             if ex is not None:
                 buf.append(ex)
                 n += ex_tokens(ex)
-        if buf and (n >= cfg["micro_tokens"] or g is None):
+        if buf and (n >= cfg["micro_tokens"] or item is None):
             with autocast(dev):
                 _, st = model.loss(to_dev(collate(buf, V, cfg), dev))
             for k, v in st.items():
                 acc[k] = acc.get(k, 0.0) + float(v)
             buf, n = [], 0
-    res = summarise(acc)
+    return acc
+
+
+class NgramModel(nn.Module):
+    """The model-free reference for the gap loss: an add-alpha bigram over the corpus's own bar tokens, scored
+    through the same example builder, the same gaps and the same weights as a trained model, so "nats below
+    the bigram" is one scale every architecture can be placed on, whatever it is allowed to see."""
+
+    def __init__(self, logp: np.ndarray, V: Vocab, micro_tokens=16384):
+        super().__init__()
+        self.cfg = {"kind": "flat", "ctx": CMP_CTX, "micro_tokens": micro_tokens, "name": "bigram"}
+        self.register_buffer("logp", torch.as_tensor(logp), persistent=False)
+        self.register_buffer("kind", torch.as_tensor(V.kind), persistent=False)
+
+    def loss(self, b):
+        return token_loss(self.logp[b["ids"][:, :-1]], b["ids"][:, 1:], b["w"], self.kind)
+
+
+def fit_bigram(c: Corpus, alpha=0.5, chunk=2000) -> np.ndarray:
+    """Bigram counts over the training songs' bar tokens, add-alpha smoothed, as log-probabilities. Pairs are
+    taken within one song at a time, so no count crosses a song boundary."""
+    n = c.vocab.size
+    cnt, buf = np.zeros(n * n, np.int64), []
+    for sid, s in enumerate(c.songs):
+        if s["split"] == "train":
+            t = (np.asarray(c.view(sid).tok) & MASK).astype(np.int64)
+            if len(t) > 1:
+                buf.append(t[:-1] * n + t[1:])
+        if len(buf) >= chunk or (sid == len(c.songs) - 1 and buf):
+            cnt += np.bincount(np.concatenate(buf), minlength=n * n)
+            buf = []
+    p = cnt.reshape(n, n).astype(np.float64) + alpha
+    return np.log(p / p.sum(1, keepdims=True)).astype(np.float32)
+
+
+def ngram_ref(c: Corpus, split="val", build=False) -> dict | None:
+    """The bigram's losses on the same gaps, computed once per corpus and cached beside it. Returns None when
+    it has not been built yet (``riff.py ngram``), so a run without it simply reports no lift."""
+    path = c.dir / f"ngram_{split}.json"
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    if not build:
+        return None
+    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log(f"fitting the bigram on the {c.stats['train_tokens'] / 1e6:.0f}M training tokens")
+    model = NgramModel(fit_bigram(c), c.vocab).to(dev).eval()
+    gaps = [g for g in c.gaps if g["split"] == split]
+    cmp = comparable_gaps(c, split)
+    ref = {"loss": summarise(gap_loss(model, c, model.cfg, list(enumerate(gaps)), dev))["loss"],
+           "loss_cmp": summarise(gap_loss(model, c, model.cfg, cmp, dev))["loss"],
+           "gaps": len(gaps), "gaps_cmp": len(cmp), "alpha": 0.5}
+    path.write_text(json.dumps(ref, indent=1), encoding="utf-8")
+    return ref
+
+
+@torch.no_grad()
+def evaluate(model, c: Corpus, cfg, split="val", max_gaps=400, gen_gaps=8, out=None) -> dict:
+    """README §19: loss on the fixed gaps (all, rhythm, pitch, technique), the same loss on the gaps that
+    nothing in the song repeats (``loss_cmp``, comparable across architectures) and how far that is below the
+    corpus's own bigram (``lift_cmp``), and for a few gaps, written candidates: pitch-class and rhythm
+    similarity to the real bars, copies of a context bar, note density."""
+    model.eval()
+    dev = next(model.parameters()).device
+    V, gaps = c.vocab, [g for g in c.gaps if g["split"] == split][:max_gaps]
+    res = summarise(gap_loss(model, c, cfg, list(enumerate(gaps)), dev))
+    cmp = comparable_gaps(c, split)
+    if cmp and not isinstance(model, NgramModel):
+        cs = summarise(gap_loss(model, c, cfg, cmp, dev))
+        res |= {"loss_cmp": cs["loss"], "acc_cmp": cs["acc"]}
+        ref = ngram_ref(c, split)
+        if ref:
+            res["lift_cmp"] = ref["loss_cmp"] - cs["loss"]
     sims, lines = [], []
     for g in gaps[:gen_gaps]:
         view = c.view(g["song"])
@@ -1782,15 +2007,22 @@ def suggest(cfg, stats, epochs=None) -> dict:
             "hours_4090": C / 6.6e13 / 3600}                  # ~40 % of the 4090's 165 bf16 TFLOPS
 
 
-def grid_points(h) -> list[tuple[int, float]]:
-    """3 batch sizes (½, 1, 2 × the fit) × 3 learning rates (1/√2, 1, √2 × the fit, the fit scaled with √batch
-    as Adam needs). DeepSeek's near-optimal band is wide; this brackets it without bf16 blow-ups."""
+def grid_points(h, bms=(0.5, 1, 2), lms=(2 ** -0.5, 1, 2 ** 0.5)) -> list[tuple[int, float]]:
+    """Batch sizes (multiples of the fit) × learning rates (multiples of the fit, itself scaled with √batch as
+    Adam needs). DeepSeek's near-optimal band is wide; this brackets it without bf16 blow-ups."""
     out = []
-    for bm in (0.5, 1, 2):
-        B = int(h["batch_tokens"] * bm) // 4096 * 4096
-        for lm in (2 ** -0.5, 1, 2 ** 0.5):
+    for bm in bms:
+        B = max(int(h["batch_tokens"] * bm) // 4096 * 4096, 4096)
+        for lm in lms:
             out.append((B, h["lr"] * math.sqrt(bm) * lm))
     return out
+
+
+def grid_variants(cfg, aux: str, smooth: str, focal: str = "") -> list[dict]:
+    """The loss axis of this model: the aux-head weight where there are aux heads, otherwise the focusing
+    exponent if one is given, otherwise label smoothing."""
+    key, pick = ("aux", aux) if cfg.get("pointer") else ("focal", focal) if focal.strip() else ("smooth", smooth)
+    return [{key: float(x)} for x in pick.split(",") if x.strip()] or [{}]
 
 
 # ============================================================================ 6) segmentation (sections)
@@ -2456,6 +2688,14 @@ def parse_focus(s) -> dict:
 
 def cmd_train(a) -> None:
     cfg = model_cfg(a.model, a.tiny)
+    if a.micro_tokens:
+        cfg = cfg | {"micro_tokens": a.micro_tokens}
+    if a.focal:
+        cfg = cfg | {"focal": a.focal}
+    if a.smooth:
+        cfg = cfg | {"smooth": a.smooth}
+    if a.ckpt:
+        cfg = cfg | {"ckpt": True}
     h = suggest(cfg, corpus_stats(a.data), a.epochs)
     train_run(cfg, a.data, a.run or ROOT / "runs" / cfg["name"], a.lr or h["lr"], a.batch_tokens or h["batch_tokens"],
               a.epochs or cfg["epochs"], a.eval_every, a.budget, a.resume, a.init, a.lora, parse_focus(a.focus),
@@ -2473,6 +2713,16 @@ def cmd_eval(a) -> None:
     Path(a.ckpt).with_name(f"eval_{a.split}.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
 
 
+def cmd_ngram(a) -> None:
+    """Build the model-free reference the lift is measured against. Once per corpus: the result only depends
+    on the corpus, so every run and every architecture is compared with the same number."""
+    c = Corpus(a.data)
+    ref = ngram_ref(c, a.split, build=True)
+    print(json.dumps(ref, indent=1))
+    log(f"bigram on the {a.split} gaps: loss {ref['loss']:.4f} over {ref['gaps']} gaps, "
+        f"{ref['loss_cmp']:.4f} over the {ref['gaps_cmp']} comparable ones")
+
+
 def cmd_grid(a) -> None:
     """README §12: every model x 3 batch sizes x 3 learning rates, each a short run of --budget tokens; the
     lowest validation loss wins. Finished runs are skipped, so a stopped grid continues."""
@@ -2482,22 +2732,39 @@ def cmd_grid(a) -> None:
     done = {r["run"]: r for r in map(json.loads, res_path.read_text().splitlines())} if res_path.is_file() else {}
     for name in a.models.split(","):
         cfg = model_cfg(name, a.tiny)
-        for B, lr in grid_points(suggest(cfg, stats)):
-            run = f"{name}_b{B // 1024}k_lr{lr:.1e}"
-            if run in done:
-                continue
-            r = train_run(cfg, a.data, out / run, lr, B, cfg["epochs"], 0, a.budget, workers=a.workers, seed=a.seed,
-                          eval_gaps=a.eval_gaps, gen_gaps=0)
-            loss = r["best"] if math.isfinite(r["best"]) else 99.0      # a diverged run sorts last
-            done[run] = {"run": run, "model": name, "batch_tokens": B, "lr": lr, "val_loss": loss}
-            with open(res_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(done[run]) + "\n")
+        if a.micro_tokens:
+            cfg = cfg | {"micro_tokens": a.micro_tokens}
+        if a.ckpt:
+            cfg = cfg | {"ckpt": True}
+        bms = [float(x) for x in a.batches.split(",") if x.strip()]
+        lms = [float(x) for x in a.lrs.split(",") if x.strip()]
+        # centre the grid on the run length actually used (--budget), not on the model's default epochs
+        eps = a.budget / stats["train_tokens"] if a.budget else None
+        for B, lr in grid_points(suggest(cfg, stats, eps), bms, lms):
+            for var in grid_variants(cfg, a.aux, a.smooth, a.focal):
+                c = cfg | var
+                run = f"{name}_b{B // 1024}k_lr{lr:.1e}" + "".join(f"_{k}{v:g}" for k, v in var.items())
+                if run in done:
+                    continue
+                r = train_run(c, a.data, out / run, lr, B, c["epochs"], a.eval_every, a.budget, workers=a.workers,
+                              seed=a.seed, eval_gaps=a.eval_gaps, gen_gaps=0, keep_ckpt=False)
+                loss = r["best"] if math.isfinite(r["best"]) else 99.0  # a diverged run sorts last
+                be = r["best_eval"]
+                done[run] = {"run": run, "model": name, "batch_tokens": B, "lr": lr, "val_loss": loss,
+                             "real_tokens_per_step": round(r["tokens_per_step"]), "micro_tokens": r["micro_tokens"],
+                             "tokens": r["tokens"]} | var | {
+                    k: be[k] for k in ("acc", "loss_cmp", "acc_cmp", "lift_cmp") if k in be}
+                with open(res_path, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(done[run]) + "\n")
     for name in a.models.split(","):
         rows = sorted((r for r in done.values() if r["model"] == name), key=lambda r: r["val_loss"])
         for r in rows:
-            print(f"{r['run']:32} val loss {r['val_loss']:.4f}")
+            extra = "".join(f"  {k} {r[k]:.4f}" for k in ("loss_cmp", "lift_cmp") if k in r)
+            print(f"{r['run']:40} val loss {r['val_loss']:.4f}{extra}")
         if rows:
-            print(f"best {name}: --batch-tokens {rows[0]['batch_tokens']} --lr {rows[0]['lr']:.2e}\n")
+            extra = " ".join(f"{k} {rows[0][k]:g}" for k in ("aux", "smooth") if rows[0].get(k) is not None)
+            print(f"best {name}: --batch-tokens {rows[0]['batch_tokens']} --lr {rows[0]['lr']:.2e}"
+                  + (f" ({extra})" if extra else "") + "\n")
 
 
 def find_gaps(song, guitars, min_len) -> list[tuple[int, int]]:
@@ -2537,6 +2804,8 @@ def write_bars(path_in, enc, positions, bars, V, out_path) -> None:
             elif slot >= 0 and k == K_FX:
                 beat[2][-1][2].add(V.tokens[t][3:])
         for slot, ti in enumerate(enc["guitars"]):
+            if slot not in parts:          # a bar too dense to hold every guitar carries fewer slots than the
+                continue                   # song has: that track keeps the bar as it was written
             measure = song.tracks[ti].measures[m]
             for v in measure.voices:
                 v.beats = []
@@ -2632,6 +2901,9 @@ def main(argv=None) -> None:
     p.add_argument("--out", default=data)
     p.add_argument("--workers", type=int, default=max(1, mp.cpu_count() - 1))
     p.add_argument("--limit", type=int, default=0, help="a random subset of N files (a quick look)")
+    p.add_argument("--exclude", default="", help="drop files by label, e.g. album:*,src:own")
+    p.add_argument("--frac", type=float, default=1.0,
+                   help="keep this fraction of the files of each folder, before the train/test split")
     p.add_argument("--max-versions", type=int, default=3, help="versions of one song kept")
     p.add_argument("--seed", type=int, default=1234)
     p = sub.add_parser("hparams", help="the calculated batch sizes and learning rates")
@@ -2639,10 +2911,16 @@ def main(argv=None) -> None:
     p.add_argument("--models", default="baseline,big,huge")
     p = sub.add_parser("train", help="2) train one model, 3) evaluating every --eval-every epochs")
     p.add_argument("--model", choices=list(MODELS), default="big")
+    p.add_argument("--focal", type=float, default=0.0, help="focusing exponent (README §12); 0 is off")
+    p.add_argument("--smooth", type=float, default=0.0, help="label smoothing; the Nov 5 grid found it hurts")
+    p.add_argument("--ckpt", action="store_true",
+                   help="recompute the activations instead of storing them: same arithmetic, ~a third slower")
     p.add_argument("--data", default=data)
     p.add_argument("--run", default=None)
     p.add_argument("--epochs", type=float, default=None)
     p.add_argument("--batch-tokens", type=int, default=None, help="default: calculated (python riff.py hparams)")
+    p.add_argument("--micro-tokens", type=int, default=0,
+                   help="tokens per micro-batch (memory only; the optimiser step stays --batch-tokens)")
     p.add_argument("--lr", type=float, default=None, help="default: calculated")
     p.add_argument("--eval-every", type=float, default=0.5, help="epochs between evaluations")
     p.add_argument("--budget", type=float, default=None, help="stop after N tokens")
@@ -2679,15 +2957,30 @@ def main(argv=None) -> None:
     p.add_argument("--allow-copy", action="store_true", help="keep candidates that repeat a bar of the song")
     p.add_argument("--out", default=None)
     p.add_argument("--cpu", action="store_true")
-    p = sub.add_parser("grid", help="5) grid search: models x 3 batch sizes x 3 learning rates")
+    p = sub.add_parser("grid", help="5) grid search: models x 3 batch sizes x 3 learning rates (x --aux weights)")
     p.add_argument("--data", default=data)
-    p.add_argument("--models", default="baseline,big,huge")
+    p.add_argument("--models", default="baseline,huge",
+                   help="big is left out: all 36 huge runs of the Nov 5 grid beat big's best (README §12)")
     p.add_argument("--budget", type=float, default=1e8, help="tokens per run")
     p.add_argument("--out", default=str(ROOT / "runs" / "grid"))
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=1234)
     p.add_argument("--eval-gaps", type=int, default=400)
+    p.add_argument("--eval-every", type=float, default=0.125, help="epochs between evaluations (0: only at the end)")
+    p.add_argument("--aux", default="", help="aux-loss weights to try on the pointer model, e.g. 0,0.1,0.2")
+    p.add_argument("--smooth", default="", help="label smoothings to try on the models without aux heads, e.g. 0,0.05")
+    p.add_argument("--focal", default="", help="focusing exponents to try instead of label smoothing, e.g. 0,1,2")
+    p.add_argument("--ckpt", action="store_true",
+                   help="recompute the activations instead of storing them: exactly the same arithmetic in "
+                        "about a third more time, for a micro-batch that does not fit otherwise")
+    p.add_argument("--batches", default="0.5,1,2", help="batch sizes as multiples of the calculated fit")
+    p.add_argument("--lrs", default="0.707,1,1.414", help="learning rates as multiples of the calculated fit")
+    p.add_argument("--micro-tokens", type=int, default=0,
+                   help="tokens per micro-batch (memory only; the optimiser step stays the grid's batch size)")
     p.add_argument("--tiny", action="store_true")
+    p = sub.add_parser("ngram", help="the bigram reference the lift is measured against (once per corpus)")
+    p.add_argument("--data", default=data)
+    p.add_argument("--split", default="val")
     p = sub.add_parser("segment", help="6) sections: train / eval / label the tabs without markers")
     p.add_argument("action", choices=("train", "eval", "rules", "fuse", "label"))
     p.add_argument("--data", default=data)
@@ -2711,7 +3004,7 @@ def main(argv=None) -> None:
     a = ap.parse_args(argv)
     torch.backends.cuda.matmul.allow_tf32 = True
     {"prepare": cmd_prepare, "hparams": cmd_hparams, "train": cmd_train, "eval": cmd_eval, "infer": cmd_infer,
-     "grid": cmd_grid, "segment": cmd_segment}[a.cmd](a)
+     "grid": cmd_grid, "ngram": cmd_ngram, "segment": cmd_segment}[a.cmd](a)
 
 
 if __name__ == "__main__":

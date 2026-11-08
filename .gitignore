@@ -1,20 +1,71 @@
+# ---------------------------------------------------------------- python
 __pycache__/
 *.pyc
 .venv*/
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# everything under data/ is local (own songs, corpora, downloaded tabs, browser profile, logs):
-# only the downloader code in data/*.py is tracked
+# ---------------------------------------------------------------- the tab collection
+# Everything under data/ is local: the album folders (__<album>/own, __<album>/insp), the genre folders,
+# the encoded corpora, the browser profile and the downloader's logs. Only the downloader code is tracked.
 data/*
 !data/*.py
-data/tabs*/
 
 # local copies of the tab collection
 data - Copy/
 tabs backup/
 
-# training and generation outputs
+# Guitar Pro files anywhere, not just under data/: the collection is ~61k tabs and none of it belongs in
+# git - neither the downloaded tabs nor my own songs. The two exceptions below are code, not tabs: the
+# codec's empty template and one test fixture, both a few KB.
+*.gp3
+*.gp4
+*.gp5
+*.gpx
+*.ptb
+*.tg
+!riffgen/gp/codec/blank.gp5
+!tests/fixtures/progmetal.gp3
+
+# ---------------------------------------------------------------- model snapshots and encoded corpora
+# Checkpoints are hundreds of MB and reproducible from a config; the corpora are rebuilt by riff.py prepare.
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.npy
+*.npz
+tokens.bin
+bar_*.npy
+ngram_*.json
+# (a corpus's meta.json is not ignored by name - too generic to catch repo-wide; data/* already covers it)
+
+# rendered or exported audio
+*.mid
+*.midi
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# ---------------------------------------------------------------- training and generation outputs
 runs/
 outputs/
 reports/*
+
+# ---------------------------------------------------------------- logs, scratch, editor, OS
+*.log
+nohup.out
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
