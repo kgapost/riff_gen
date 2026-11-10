@@ -1,7 +1,7 @@
 """Everything that collects tabs from Ultimate Guitar: the tab list, the download, the sorting.
 
-    python data/dl.py list https://www.ultimate-guitar.com/artist/meshuggah_3907
-    python data/dl.py list --file bands.txt --min-rating 4.6 --best-only
+    python data_dl.py list https://www.ultimate-guitar.com/artist/meshuggah_3907
+    python data_dl.py list --file bands.txt --min-rating 4.6 --best-only
 
 ``list`` reads the public artist pages (Guitar Pro filter) and adds the free community Guitar Pro tabs
 rated above ``--min-rating`` to data/list.csv. It waits 7.5-15 s between requests, caches pages for a
@@ -10,10 +10,10 @@ uses no account and no cookies. A row already in the list keeps its status, its 
 only other tools write (genre, difficulty, popularity).
 
     set UG_PASSWORD=...            (or pass --password)
-    python data/dl.py --user konstant_apost --limit 3
-    python data/dl.py --only-first 11218
-    python data/dl.py --retry-failed
-    python data/dl.py --report
+    python data_dl.py --user konstant_apost --limit 3
+    python data_dl.py --only-first 11218
+    python data_dl.py --retry-failed
+    python data_dl.py --report
 
 Without a command, the tabs of data/list.csv are downloaded with a real browser: a headed Chromium
 logs in to Ultimate Guitar once, then walks the tab pages in order: render the page, press the
@@ -34,21 +34,21 @@ __v/__id marker, "Last, First" -> "First Last" when the library already spells t
 copy is dropped, and only the largest version of a song stays. The tab ends up in the genre folder of its artist
 (the folder where most of the artist's tabs already are), else the one for the list's genre, else
 "tabs - metal generic". Anything pushed out or rejected goes to data/__removed, nothing is deleted.
-The rules live in data/curate.py.
+The rules live in data_curate.py.
 
-    python data/dl.py curate some.gpx "some folder"        # the same for files you add by hand
+    python data_dl.py curate some.gpx "some folder"        # the same for files you add by hand
 
-    python data/dl.py get https://tabs.ultimate-guitar.com/tab/meshuggah/bleed-guitar-pro-1234567 --user ...
-    python data/dl.py get https://www.ultimate-guitar.com/artist/meshuggah_3907 --genre Metal --user ...
+    python data_dl.py get https://tabs.ultimate-guitar.com/tab/meshuggah/bleed-guitar-pro-1234567 --user ...
+    python data_dl.py get https://www.ultimate-guitar.com/artist/meshuggah_3907 --genre Metal --user ...
 
 ``get`` downloads one tab page, or every song of a band (artist page: its free community Guitar Pro tabs,
 ``--min-rating`` narrows them), with the same browser, pacing and curation. Of a band, only the best-rated
 version of each song not on disk yet is fetched, as always; a tab page is fetched even when the song is
 (``--all-versions`` does that for a band too). The tabs are recorded in data/list.csv. Download options pass through.
-To curate a collection of your own without touching data/, use data/curate.py.
+To curate a collection of your own without touching data/, use data_curate.py.
 
-    python data/dl.py sort --downloads ~/Downloads --dest "data/own/Compound Structure/influences"
-    python data/dl.py sort --downloads "data/tabs - generic" --manifest data/state.json --dest ... --move
+    python data_dl.py sort --downloads ~/Downloads --dest "data/own/Compound Structure/influences"
+    python data_dl.py sort --downloads "data/tabs - generic" --manifest data/state.json --dest ... --move
 
 ``sort`` never touches the network: it matches downloaded files to the list, renames them
 ``Artist - Song.gp5`` / ``Artist - Song__v2.gp5`` (versions of one song form one song family) and files
@@ -86,13 +86,13 @@ if TYPE_CHECKING:  # playwright is only needed to download, so it is imported th
     from playwright.sync_api import BrowserContext, Page
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import curate as cur  # noqa: E402 - the curation rules (and data/convert.py) live next to this file
-from curate import GENRE_SUFFIX, GENRES, GP_EXTENSIONS, NoChannel, clean, convert_module, gp, stem_key  # noqa: E402,F401
+import data_curate as cur  # noqa: E402 - the curation rules (and data_convert.py) live next to this file
+from data_curate import GENRE_SUFFIX, GENRES, GP_EXTENSIONS, NoChannel, clean, convert_module, gp, stem_key  # noqa: E402,F401
 
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
 WORK = ROOT / "data"
-PROFILE = WORK / "profile"
+PROFILE = ROOT / "data_encoded" / "profile"
 DOWNLOAD_DIR = WORK / "tabs - generic"      # new tabs land here
 ERROR_DIR = WORK / "errors"
 STATE_PATH = WORK / "state.json"
@@ -925,7 +925,7 @@ def cmd_sort(argv: list[str]) -> int:
     for line in done:
         print("  " + line)
     if export:
-        print(f"\n{len(export)} files are Guitar Pro 6/7 (.gpx/.gp): convert them with python data/convert.py")
+        print(f"\n{len(export)} files are Guitar Pro 6/7 (.gpx/.gp): convert them with python data_convert.py")
         for e in export:
             print("  " + e)
     if problems:
@@ -978,7 +978,7 @@ def Library(work: Path | None = None) -> cur.Library:
 
 
 def curate_file(src: Path, genre: str, lib: cur.Library) -> tuple[str, str, str]:
-    """Clean one downloaded tab and file it (data/curate.py). -> (status, final path, note); status is
+    """Clean one downloaded tab and file it (data_curate.py). -> (status, final path, note); status is
     ok / duplicate (not kept: same file, or not among the best versions; the file is in __removed) / rejected
     (fails the training filters; in __removed/rejected) / failed."""
     return cur.curate_file(src, genre, lib, KEEP_VERSIONS, TRAIN_FILTERS)

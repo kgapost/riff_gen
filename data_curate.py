@@ -1,8 +1,8 @@
 """Curate a collection of Guitar Pro tabs on your own disk, by the rules the training set was cleaned with.
 
-    python data/curate.py "D:/tabs/new stuff" --out "D:/tabs/curated"
-    python data/curate.py a.gpx b.gp4 "some folder" --out "D:/tabs/curated" --genre-folders --genre Metal
-    python data/curate.py "D:/tabs/new stuff" --out "D:/tabs/curated" --move
+    python data_curate.py "D:/tabs/new stuff" --out "D:/tabs/curated"
+    python data_curate.py a.gpx b.gp4 "some folder" --out "D:/tabs/curated" --genre-folders --genre Metal
+    python data_curate.py "D:/tabs/new stuff" --out "D:/tabs/curated" --move
 
 These are the rules every download of dl.py goes through too (dl.py imports them from here). Every tab
 (.gp3/.gp4/.gp5/.gpx/.gp, folders are searched recursively):
@@ -17,8 +17,9 @@ These are the rules every download of dl.py goes through too (dl.py imports them
 - it must pass the training filters (riff.py's encoder, as ``riff.py prepare`` runs it): a guitar track with
   notes, a tuning riff.py can map onto 7-string Drop A, time signatures it knows, no bar too dense to encode;
   a tab that fails is "rejected" (``--no-train-filters`` skips this; it needs numpy and torch);
-- the name is cleaned: no special characters, no genre tag, no __v/__id marker, "Beatles, The" -> "The Beatles",
-  "Last, First" -> "First Last" when the collection already spells that artist so; a file not named
+- the name is cleaned: no special characters, no genre tag, no __v/__id marker; the artist in one canonical form:
+  "Beatles, The" / "Beatles (The)" -> "The Beatles", "Hendrix, Jimi" -> "Jimi Hendrix" (always when the collection
+  already spells it so, else when the surname is one plain word), then the collection's own spelling; a file not named
   "Artist - Song" is named after the artist and title stored in the tab, when it has them;
 - a byte-identical copy anywhere in the collection is dropped, and of a song with more than ``--keep-versions``
   (1) different versions only the largest stay.
@@ -27,7 +28,7 @@ The curated tabs land in ``--out`` (flat), or with ``--genre-folders`` in a genr
 where most of the artist's tabs already are, else "tabs - <genre>" for ``--genre``, else "tabs - metal generic".
 Anything pushed out or rejected goes to <out>/__removed, nothing is deleted. The originals are left alone unless
 ``--move`` (then a tab that was curated, a duplicate or rejected is deleted from where it was). A report of every
-file is written to <out>/curate_report.csv. Needs PyGuitarPro, and data/convert.py next to this file.
+file is written to <out>/curate_report.csv. Needs PyGuitarPro, and data_convert.py next to this file.
 """
 
 from __future__ import annotations
@@ -115,6 +116,7 @@ GENRE_FOLDER = {
     "brazilian music": "ethnic", "bolero": "ethnic", "ethnic": "ethnic", "punk": "punk", "grunge": "grunge",
 }
 ARTICLES = {"the", "el", "la", "los", "las", "le", "les", "die", "der", "das", "il"}
+SECOND_NOT_A_FIRST_NAME = {"band", "orchestra", "ensemble", "trio", "quartet", "project", "jr", "sr", "inc", "the"}   # "Surname, Band" stays
 NOT_A_NAME = re.compile(r"[0-9&+/]|\band\b", re.I)
 
 GM = ("Acoustic Grand Piano|Bright Acoustic Piano|Electric Grand Piano|Honky-tonk Piano|Electric Piano 1|Electric Piano 2|"
@@ -194,18 +196,32 @@ class Library:
         return name
 
     def tidy_artist(self, a: str) -> str:
-        """"Beatles, The" -> "The Beatles"; "Vai, Steve" -> "Steve Vai" when the collection already spells it so."""
-        if a.count(",") != 1:
-            return a
-        x, y = (s.strip() for s in a.split(","))
-        if not x or not y:
-            return a
-        if y.lower() in ARTICLES:
-            return y[0].upper() + y[1:] + " " + x
-        if NOT_A_NAME.search(a) or not (1 <= len(x.split()) <= 3 and 1 <= len(y.split()) <= 3):
-            return a
-        forms = self.artist_forms.get(artist_key(f"{y} {x}"))
-        return forms.most_common(1)[0][0] if forms else a
+        """The artist name in its one canonical form:
+
+        - "Beatles, The" and "Beatles (The)" -> "The Beatles" (also El/La/Los/Las/Le/Les/Die/Der/Das/Il: "Renga (La)");
+        - "Vai, Steve" -> "Steve Vai": always when the collection already spells that artist so, otherwise when
+          the surname is a single word (no digits, "&"/"and", nothing like "Band, Jr");
+        - then the spelling the collection uses most for that artist ("5 nizza" -> "5nizza"), if it has one."""
+        a = a.strip()
+        m = re.match(r"^(.*?)\s*\((%s)\)$" % "|".join(sorted(ARTICLES)), a, re.I)
+        if m and m.group(1):
+            a = m.group(2)[0].upper() + m.group(2)[1:].lower() + " " + m.group(1).strip()
+        if a.count(",") == 1:
+            x, y = (s.strip() for s in a.split(","))
+            if x and y:
+                if y.lower() in ARTICLES:
+                    a = y[0].upper() + y[1:].lower() + " " + x
+                elif not NOT_A_NAME.search(a) and 1 <= len(x.split()) <= 3 and 1 <= len(y.split()) <= 3:
+                    forms = self.artist_forms.get(artist_key(f"{y} {x}"))
+                    if forms:
+                        a = forms.most_common(1)[0][0]
+                    elif (len(x.split()) == 1 and y.lower() not in SECOND_NOT_A_FIRST_NAME and not y.split()[0][0].isdigit()
+                      and x.lower() not in y.lower().split() and not y.lower().startswith("the ")):
+                        a = f"{y} {x}"
+        forms = self.artist_forms.get(artist_key(a))
+        if forms and a not in forms:
+            return sorted(forms, key=lambda v: (-forms[v], v.islower() or v.isupper(), v))[0]
+        return a
 
     def folder_for(self, artist: str, genre: str) -> str:
         """Flat: the output folder. Genre folders: where the artist's tabs already are; else the genre's folder;
@@ -399,13 +415,13 @@ _CV = None
 
 
 def convert_module():
-    """data/convert.py, set up to cut 8-string tracks to 7 strings with the cheapest method and to accept any loss."""
+    """data_convert.py, set up to cut 8-string tracks to 7 strings with the cheapest method and to accept any loss."""
     global _CV
     if _CV is None:
         here = str(Path(__file__).resolve().parent)
         if here not in sys.path:
             sys.path.insert(0, here)
-        import convert
+        import data_convert as convert
         convert._init(True, True, "any", 10 ** 9)
         _CV = convert
     return _CV
@@ -440,7 +456,7 @@ def training_check(song) -> str:
     global _RIFF
     if _RIFF is None:
         import importlib.util
-        path = Path(__file__).resolve().parents[1] / "riff.py"
+        path = Path(__file__).resolve().parent / "riff.py"
         spec = importlib.util.spec_from_file_location("riff", path)
         riff = importlib.util.module_from_spec(spec)
         sys.modules.setdefault("riff", riff)

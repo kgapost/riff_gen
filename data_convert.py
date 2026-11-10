@@ -3,10 +3,10 @@
 One self-contained file: it needs only Python 3.10+ and PyGuitarPro (``pip install PyGuitarPro``).
 Put it next to the tab folders (data/) and run it from anywhere:
 
-    python data/convert.py --dry-run          # count what is in the tabs* folders next to this file
-    python data/convert.py --limit 200        # a first try
-    python data/convert.py                    # data/tabs* -> data/gp5/<same folders>/<name>.gp5
-    python data/convert.py some/folder --out elsewhere
+    python data_convert.py --dry-run          # count what is in the tabs* folders next to this file
+    python data_convert.py --limit 200        # a first try
+    python data_convert.py                    # data/tabs* -> data/gp5/<same folders>/<name>.gp5
+    python data_convert.py some/folder --out elsewhere
 
 What it reads (the format is found from the file's first bytes, never from its extension, so a
 .gp5 that is really a .gpx, or a .gtp that is really GP3, is handled):
@@ -62,7 +62,7 @@ from pathlib import Path
 
 import guitarpro as gp
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent / "data"          # the collection: data/tabs - */
 
 # =========================================================================== GP6 / GP7 reader
 
