@@ -20,14 +20,14 @@
 # tied top group rather than on the nominal winner.
 #
 # Everything that decides the validation loss is pinned to the grid 2 values so these two rows join that table:
-# the same corpus (data/encoded_grid - do not re-prepare it), the same 410.2M-token budget (2.00 epochs of that
+# the same corpus (data_encoded/encoded_grid - do not re-prepare it), the same 410.2M-token budget (2.00 epochs of that
 # corpus), the same 400 evaluation gaps, cadence, seed, micro-batch and activation checkpointing.
 #
 # Finished runs are skipped, so this can be stopped and started again at will.
 set -u
 cd "$(dirname "$0")"
 
-COMMON="--data data/encoded_grid --out runs/grid2 --budget 410200000
+COMMON="--data data_encoded/encoded_grid --out runs/grid2 --budget 410200000
         --eval-gaps 400 --eval-every 0.125 --seed 1234 --workers 4"
 BASE="--models baseline --micro-tokens 16384 --ckpt"
 
