@@ -95,7 +95,12 @@ beat (drums)  = d:16 dr:kick dr:hat
 
 The vocabulary is about 700 tokens; labels are added at its end, so music
 tokens keep their ids. Over the whole collection (61,123 tabs) 93.9 % are
-kept (the rest have no guitar track, or one bar too dense to encode). They
+kept (the rest have nothing pitched in them at all, or one bar too dense to
+encode). A track does not have to be a guitar: a lead synth, a pad, a piano,
+strings or a vocal line is written on a fretboard like any other Guitar Pro
+track, so it is mapped onto Drop A at its own pitch and played. A real guitar
+claims a slot first and is never displaced; the other parts fill what is left,
+and a song with nothing but bass and drums has its bass line played. They
 average 68 tokens per bar and 111 bars per song, which puts the corpus at
 431 M tokens per epoch.
 

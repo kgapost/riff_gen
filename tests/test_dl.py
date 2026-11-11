@@ -182,14 +182,27 @@ def test_only_the_largest_version_of_a_song_stays(work):
     assert len(list((work / "__removed" / "tabs - rock").glob("Band - Hit*"))) == 2
 
 
-def test_a_tab_the_training_would_skip_is_rejected(work):
+def test_a_tab_with_no_guitar_is_kept_and_played(work):
+    """A synth, a pad or a piano is music too: a tab with no guitar in it is an arrangement, not a reject."""
     song = gp.parse(str(FIXTURE))
     song.tracks = [t for t in song.tracks if "guitar" not in t.name.lower() and not 24 <= t.channel.instrument <= 31]
     src = work / "tabs - generic" / "Band - No Guitar.gp5"
     gp.write(song, str(src), version=(5, 1, 0))
     status, final, note = ug.curate_download(src, ug.Target(url="u", tab_id="9"), ug.Library(work))
-    assert status == "rejected" and "no guitar track" in note and not src.exists()
-    assert (work / "__removed" / "rejected" / "Band - No Guitar.gp5").is_file()
+    assert status == "ok", note
+
+
+def test_a_tab_the_training_would_skip_is_rejected(work):
+    """Only a tab with nothing pitched in it at all - a bare drum transcription - is still thrown away."""
+    song = gp.parse(str(FIXTURE))
+    for t in song.tracks:
+        t.isPercussionTrack = True
+        t.channel.channel, t.channel.effectChannel = 9, 9
+    src = work / "tabs - generic" / "Band - Drums Only.gp5"
+    gp.write(song, str(src), version=(5, 1, 0))
+    status, final, note = ug.curate_download(src, ug.Target(url="u", tab_id="9"), ug.Library(work))
+    assert status == "rejected" and "no pitched track" in note and not src.exists()
+    assert (work / "__removed" / "rejected" / "Band - Drums Only.gp5").is_file()
 
 
 def test_tidy_artist_swaps_only_when_sure(work):

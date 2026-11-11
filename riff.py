@@ -227,15 +227,28 @@ def drum_class(n: int) -> int:
 
 
 def track_kind(t) -> str | None:
+    """drums / bass / guitar / melodic, or None for a track with nothing to play.
+
+    "melodic" is every other pitched part: a lead synth, a pad, a piano, strings, a vocal line. These are
+    written on a fretboard like any other Guitar Pro track - a MIDI import gets six standard strings and
+    real (string, fret) pairs - so ``place_note`` maps them onto Drop A at their own pitch exactly as it
+    maps a guitar, and nothing about the vocabulary changes. They are kept apart from "guitar" only so a
+    real guitar still claims a slot first.
+    """
     if t.isPercussionTrack:
         return "drums"
     n, prog, name = len(t.strings), t.channel.instrument, (t.name or "").lower()
     low = min((s.value for s in t.strings), default=0)
-    if 32 <= prog <= 39 or "bass" in name or n in (4, 5) or (n and low < 31):
+    if 32 <= prog <= 39 or "bass" in name or n in (4, 5):
         return "bass"
     if n in (6, 7) and (24 <= prog <= 31 or re.search(r"guit|gtr|git|rhythm|lead|solo|dist|clean|acoust|riff", name)):
         return "guitar"
-    return None
+    # Only now the "it sounds too low to be a guitar" guess. It used to come first and took every
+    # low-tuned seven-string with it - a track literally named "Rhythm Guitar" on a steel-string program,
+    # tuned down to F1, was read as a bass and its song thrown away for having no guitar in it.
+    if n and low < 31:
+        return "bass"
+    return "melodic" if n else None
 
 
 def open_strings(t) -> list[int]:
@@ -251,7 +264,13 @@ def tuning_plans(tracks):
     """
     opens, tgts, diffs = [open_strings(t) for t in tracks], [], Counter()
     for op in opens:
-        tgt = list(range(1, 7)) if len(op) == 6 and op[4] - op[5] == 7 else list(range(min(len(op), 7)))
+        if len(op) <= 5 and op and max(op) < 52:
+            # A bass promoted to the played part (a song with nothing but bass and drums). Its strings
+            # belong on Drop A's LOWEST ones: lining a bass up with the top strings the way a guitar is
+            # lined up asks for a transposition of about +21, which "tuning out of range" then refuses.
+            tgt = list(range(7 - len(op), 7))
+        else:
+            tgt = list(range(1, 7)) if len(op) == 6 and op[4] - op[5] == 7 else list(range(min(len(op), 7)))
         tgts.append(tgt)
         diffs.update(DROP_A[t] - op[i] for i, t in enumerate(tgt))
     k = max(diffs, key=lambda d: (diffs[d], -abs(d)))
@@ -380,17 +399,31 @@ def encode_song(song, V: Vocab, max_bars: int = 2048) -> dict:
     tracks = song.tracks
     kinds = [track_kind(t) for t in tracks]
     counts = [sum(len(b.notes) for m in t.measures for v in m.voices for b in v.beats) for t in tracks]
+    # A real guitar claims a slot first, then every other pitched part - lead synth, pad, piano, strings,
+    # a vocal line - densest first. A tab written without a single guitar is therefore still playable:
+    # what comes out is a guitar arrangement of whatever carried the music, which is the point. Only a
+    # song with nothing pitched in it at all (a bare drum transcription) is skipped now.
+    pick = sorted((i for i, k in enumerate(kinds) if k == "guitar" and counts[i]), key=lambda i: -counts[i])
+    pick += sorted((i for i, k in enumerate(kinds) if k == "melodic" and counts[i]), key=lambda i: -counts[i])
     guitars, seen = [], set()
-    for i in sorted((i for i, k in enumerate(kinds) if k == "guitar" and counts[i]), key=lambda i: -counts[i]):
+    for i in pick:
         sig = hash(tuple((b.start, n.string, n.value) for m in tracks[i].measures for v in m.voices
                          for b in v.beats for n in b.notes))
         if sig not in seen and len(guitars) < len(V.trk_g):  # doubled tracks are kept once
             seen.add(sig)
             guitars.append(i)
-    guitars.sort()
     if not guitars:
-        raise Skip("no guitar track")
-    first = lambda kind: next((i for i, k in enumerate(kinds) if k == kind and counts[i]), None)  # noqa: E731
+        # Nothing but bass and drums: a lot of hip hop and funk transcriptions are exactly that, and the
+        # bass line is the hook, so it is played rather than left as context. Last resort only - while any
+        # guitar or other pitched part exists, the bass stays where it belongs, under the song.
+        busiest = max((i for i, k in enumerate(kinds) if k == "bass" and counts[i]), key=lambda i: counts[i],
+                      default=None)
+        if busiest is None:
+            raise Skip("no pitched track")
+        guitars = [busiest]
+    guitars.sort()
+    first = lambda kind: next((i for i, k in enumerate(kinds)                           # noqa: E731
+                               if k == kind and counts[i] and i not in guitars), None)
     dr, bs = first("drums"), first("bass")
     k, plans = tuning_plans([tracks[i] for i in guitars])
     if abs(k) > 12:
