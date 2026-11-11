@@ -66,7 +66,8 @@ MASK = 0x7FFF
 # every album is registered while its folder is still empty, and GENRE_OTHER absorbs any folder not listed, so a
 # new genre folder costs nothing. Music token ids never depend on any of this - labels go last.
 EARLY = {"generic", "exercises", "metal_generic"}       # the early years: learned from, steered away from
-ALBUMS = ("vc1", "vc2", "caffeine", "cs", "potha", "tme", "maphorion", "omni", "waves_black", "waves_white", "inner", "popper")
+ALBUMS = ("vc1", "vc2", "caffeine", "cs", "potha", "tme", "maphorion", "omni", "waves_black", "waves_white",
+          "inner", "popper", "hh")
 GENRES = ("acoustic", "blues_soul_rnb", "britpop", "classical", "doom_stoner_sludge", "electronic", "ethnic", "experimental",
           "funk", "funkrock", "grunge", "jazz", "metal_classic", "metal_groove", "metal_melodic_death", "metal_modern",
           "metal_nu", "metal_power", "metal_thrash", "metal_xtreme", "pop", "prog", "punk", "rock", "rock_classic",
