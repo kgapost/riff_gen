@@ -43,7 +43,7 @@ import riff  # noqa: E402
 
 # --------------------------------------------------------------------------- the winning configuration
 MODEL = "baseline"
-LR = 3.74e-04          # grid2 cell baseline_b16k_lr3.7e-04_smooth0, val 0.19654
+LR = 3.74e-04          # val 0.19654; see grid_search.py for the 121 runs behind this and its error bars
 BATCH_TOKENS = 16384
 MICRO_TOKENS = 16384   # memory only; activation checkpointing keeps this inside 24 GB
 DROP = 0.0
