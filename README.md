@@ -95,7 +95,12 @@ beat (drums)  = d:16 dr:kick dr:hat
 
 The vocabulary is about 700 tokens; labels are added at its end, so music
 tokens keep their ids. Over the whole collection (61,123 tabs) 93.9 % are
-kept (the rest have no guitar track, or one bar too dense to encode). They
+kept (the rest have nothing pitched in them at all, or one bar too dense to
+encode). A track does not have to be a guitar: a lead synth, a pad, a piano,
+strings or a vocal line is written on a fretboard like any other Guitar Pro
+track, so it is mapped onto Drop A at its own pitch and played. A real guitar
+claims a slot first and is never displaced; the other parts fill what is left,
+and a song with nothing but bass and drums has its bass line played. They
 average 68 tokens per bar and 111 bars per song, which puts the corpus at
 431 M tokens per epoch.
 
@@ -298,11 +303,27 @@ the global model's cost spread over a bar's tokens and the local decoder on
 \* At 40 % of the 4090's bf16 peak; the hierarchical models reach less in
 plain PyTorch, so plan for 2–3× longer.
 
-`riff.py grid` tries 3 batch sizes (½, 1 and 2 × the fit) × 3 learning
-rates per model. The learning rates are 1/√2, 1 and √2 × the fit, scaled
-with √batch, as Adam needs (Malladi et al., 2022). Each run is a short
-100M-token run, and the lowest validation loss wins. Finished runs are
-skipped, so a stopped grid continues.
+**Those calculated values are the prediction, and 121 runs disproved it.**
+The fit overestimates both lr and batch by about 4× for this task, and the
+√batch scaling of the learning rate over-corrects: the best absolute lr sits
+in a narrow 3.7–7.5e-04 band at *every* batch size from 16k to 132k. What
+the search actually settled on is
+
+| | value | |
+|---|---|---|
+| model | `baseline` | flat decoder, 4096-token FIM window |
+| context | 4096 | an interior optimum: 2048 and 16384 are both clearly worse |
+| batch | 16384 tokens | the fit said 217k |
+| learning rate | 3.74e-04 | the fit said 1.8e-3 |
+| dropout | 0.0 | on priors, not proof |
+| label smoothing | off | hurt in all 111 runs |
+| focal loss | off | hurt monotonically |
+
+`train_n_test.py` has these as its defaults, so it needs no flags. The full
+account is in [What the grid search found](#what-the-grid-search-found);
+read the noise floor there before trusting any ranking, including this one.
+`grid_search.py` runs further sweeps, with seeds, and says which cells it
+refuses to tell apart.
 
 **13. Album LoRA.** About 200 tabs cannot safely move all the weights.
 `--lora 16` freezes the model and adds rank-16 updates to every attention
@@ -446,6 +467,94 @@ is about 1 hour on one core or about 10 minutes over the 12 cores (the
 corpus encoding scaled 4.7× there). It writes labelled copies and never
 changes the originals.
 
+## What the grid search found
+
+121 runs over twelve days (2026-10-30 to 11-11). Every one was 410.2 M tokens
+— 2.00 epochs of `encoded_grid`, a halved corpus with the own-project tabs
+excluded — at 400 evaluation gaps, cadence 0.125, micro-batch 16384 and
+activation checkpointing, so all 121 numbers sit in one table. The raw rows
+are committed in [`results/`](results/) — one JSON object per run — because
+`runs/` is gitignored and they would otherwise exist only on the machine that
+produced them. `grid_search.py` carries the same record in its docstring.
+Note that **none of it can be reproduced or extended**: `encoded_grid` was
+deleted on 2026-11-11, so anything measured later is on a different corpus.
+
+**Round 1 — 84 runs, baseline × big × huge.** Settled label smoothing: it
+hurt on both best and mean, on both architectures, without exception. It also
+found the grid pegged against its own lower edge — batch and lr were monotone
+and best at the lowest point tried — so it did not bracket the optimum, and
+the DeepSeek fit was overshooting by about 4×. The raw losses (baseline 0.198,
+big 0.973, huge 0.802) were *not* a like-for-like quality comparison: a flat
+model reads its context as literal tokens and can copy a repeated bar, while
+the hierarchical models see one pooled vector per bar.
+
+**Round 2 — 27 runs, shifted downward, plus a fair metric.** `loss_cmp` scores
+only the 114 validation gaps where **no bar of the gap occurs anywhere else in
+the song**, so nothing can be copied and both architectures weight an identical
+set of target tokens. On it, `baseline` beat `huge` 0.61 against 1.21 — every
+baseline run ahead of every huge run. That closed the architecture question and
+the remaining 11 `huge` cells were cancelled rather than spend ~29 h confirming
+it. Focal loss was tried here and hurt monotonically: 0.226 at focal 1 and
+0.279 at focal 2, against 0.199 for the same cell unfocused.
+
+| top of the table | val CE | loss_cmp |
+|---|---|---|
+| `b16k lr 3.7e-04` | 0.19654 | 0.61456 |
+| `b16k lr 5.3e-04` | 0.19769 | 0.61847 |
+| `b64k lr 7.5e-04` | 0.19916 | 0.62126 |
+| `b32k lr 7.5e-04` | 0.19920 | 0.62293 |
+| `b32k lr 5.3e-04` | 0.19935 | 0.62278 |
+
+**Round 3 — 10 runs, the three axes the grid never touched.**
+
+*Seeds, and this is the result that governs everything else.* One cell
+(ctx 4096, b16k, lr 3.74e-04) run four times gave **0.19654 / 0.19717 /
+0.20015 / 0.19656** — a spread of **0.0036**, sd 0.0017. Two of those share a
+seed and still differ by 0.00063, from the four dataloader workers and
+non-deterministic CUDA kernels alone, so even an identical command does not
+reproduce. The consequence is blunt: the table above spans 0.0028 across its
+top five, and the top **seven** cells of the 21-run baseline grid span 0.0032
+— all inside one seed spread. **They were never distinguishable**, and the
+nominal winner was one lucky seed: over three seeds `lr 5.29e-04` has the
+marginally better mean (0.19726 against 0.19761).
+
+> Believe an effect only if it clears ~0.004 val CE, or if 3-seed means
+> separate it cleanly. Single-run rankings on this task are noise.
+
+*Context length has an interior optimum*, which is why it is 4096 and not a
+default:
+
+| ctx | val CE | loss_cmp | hours |
+|---|---|---|---|
+| 2048 | 0.22081 | 0.63920 | 1.78 |
+| **4096** | 0.19717 | **0.61554** | 2.09 |
+| 8192 | **0.19354** | 0.63988 | 2.88 |
+| 16384 | 0.21808 | 0.67122 | 3.90 |
+
+The two metrics disagree in the middle and agree at both ends. 8192 wins
+val CE — which is dominated by the 86 % of gaps containing a repeated bar, so
+it rewards *recall* — and loses `loss_cmp`, whose gaps are copy-proof, so it
+measures *invention*. It also costs 38 % more time. 16384 is worse on both,
+because the window is already big enough: 90 % of songs fit inside it entirely,
+and at ctx 16384 the mean example is 5151 tokens in a ~15148-token window.
+2048 losing 0.024 was a surprise — repeated bars sit a median of 2 bars apart
+and `choose_context` already captures 97.5 % of them, so the window's value is
+mostly plain local context, not retrieval.
+
+*Dropout* came out 0.0 → 0.19601, 0.1 → 0.19761 (mean of four), 0.2 → 0.20012:
+monotone on both metrics across six runs, but 0.0 beats 0.1 by less than one
+seed sd. It is adopted on priors — two epochs over a corpus this size should
+underfit — and is the one axis still genuinely open.
+
+**Also settled, so do not pay for them again:** the architecture, the context
+length, label smoothing, focal loss, large batches (`b132k`'s own best cell
+lost to every b16k/b32k/b64k cell in the band and degraded monotonically
+above it), and the shape of the lr/batch fit. **Still open:** dropout, budget
+scaling (deliberately never probed — `encoded_grid` held half the tokens, so
+4× budget there would have been 8 epochs of a subsample and would not have
+transferred), and lr × batch if the corpus moves the optimum, which encoding
+every pitched part may well have done.
+
 ## Pitfalls handled
 
 - Repeats: `repeatClose` counts *extra* passes, and `repeatAlternative` is a
@@ -540,9 +649,14 @@ Install PyTorch for your GPU first (`cu128` for RTX 30/40, `cu126` for the
 GTX 1650), then `pip install -e ".[dev]"`.
 
 ```bash
+python train_n_test.py                       # encode if needed, train the winning configuration, test best.pt
+python train_n_test.py --test-only runs/final   # score an existing run on the held-out test split
+python grid_search.py --list                 # what a further sweep would run, and what is already settled
+python grid_search.py --lrs 1 --drops 0,0.05,0.1    # the one axis still open, 3 seeds a cell
+
 python riff.py prepare                       # 1) split, curate, encode: data/tabs - */, data/tabs - own - */ -> data_encoded/encoded/
-python riff.py hparams                       # the calculated batch sizes and learning rates
-python riff.py grid                          # 5) 3 models x 3 batch sizes x 3 learning rates, 100M tokens each
+python riff.py hparams                       # the CALCULATED batch/lr - the grid disproved these, see §12
+python riff.py grid                          # the original single-seed grid; grid_search.py supersedes it
 python riff.py train --model big             # 2) train; 3) evaluates every --eval-every 0.5 epochs
 python riff.py train --model big --init runs/big/best.pt --run runs/big_cs --lora 16 --focus album:cs=20
 python riff.py eval --ckpt runs/big/best.pt  # 3) test-split loss and generation metrics

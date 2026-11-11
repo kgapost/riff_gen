@@ -9,7 +9,7 @@ PyGuitarPro==0.6
 # Tools (pyproject.toml [tools] extra)
 scikit-learn>=1.3
 joblib
-playwright>=1.40         # data/dl.py (drives the browser)
+playwright>=1.40         # data_dl.py (drives the browser)
 
 gdown>=5   # data_tabs.py fetch (the tab backup on Google Drive)
 
