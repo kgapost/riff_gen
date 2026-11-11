@@ -590,6 +590,13 @@ def cmd_prepare(a) -> None:
         seen[d] = True
     if n := sum(v - 1 for v in copies.values()):
         notes["copies of a tab in another folder"] = n
+    if not songs:
+        # Every file was skipped. Without this the next line dies on an empty list with "need at least one
+        # array to concatenate", which says nothing about why; the skip counts are the answer and they are
+        # right here. It happens when a folder holds only tabs the encoder cannot use - drum, bass or piano
+        # transcriptions with no guitar track, say.
+        sys.exit(f"no song survived: {len(files)} file(s) read, all skipped\n"
+                 + "\n".join(f"  {n:6d}  {why}" for why, n in skips.most_common()))
     lens = np.concatenate(lens)
     np.save(out / "bar_off.npy", np.concatenate([[0], np.cumsum(lens, dtype=np.int64)]))
     for k, v in feats.items():
