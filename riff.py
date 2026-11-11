@@ -92,9 +92,6 @@ def album_folder(top: str):
     return (re.sub(r"[^a-z0-9]+", "_", m.group(1).lower()).strip("_"), m.group(2).lower()) if m else None
 
 
-K_DUR, K_NOTE, K_FX, K_TRK, K_BASS, K_DRUM, K_TS, K_SEC, K_TREM = range(1, 10)
-
-
 def dur_name(v: int, dot: bool, tup: int) -> str:
     return f"d:{v}{'.' if dot else ''}{f't{tup}' if tup > 1 else ''}"
 
