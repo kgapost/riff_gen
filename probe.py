@@ -73,7 +73,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import riff                                                   # noqa: E402
 
-DATA = "data/encoded_grid"           # do NOT re-prepare: the fixed gaps are what makes these comparable
+# The corpus these ten runs used. It was removed from iti-1261 on 2026-11-11 along with data/encoded, when
+# the tabs were packed into data/tabs_part*.zip, and it cannot be rebuilt: the genre and album folders have
+# since been recurated and the label constants changed (21 -> 28 genres, new ALBUMS). So runs/probe and
+# runs/grid2 are a closed table - re-running anything here produces numbers on a different corpus.
+DATA = "data_encoded/encoded_grid"   # the path the rest of the repo now uses; nothing is there yet
 OUT = Path("runs/probe")
 BUDGET = 410_200_000                 # 2.00 epochs of this corpus, exactly as in runs/grid2
 COMMON = dict(eval_every=0.125, eval_gaps=400, gen_gaps=0, workers=4, keep_ckpt=False)

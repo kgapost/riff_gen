@@ -17,6 +17,13 @@ data_encoded/
 data - Copy/
 tabs backup/
 
+# riff_index/: on iti-1261 this is no longer scripts/export_index.sh's staging copy but the ONLY surviving
+# copy of the full encoded corpus (56,220 songs, 417.8M tokens, the pre-Nov-10 21-genre vocabulary), since
+# data/encoded and data/encoded_grid were removed when the tabs were packed into data/tabs_part*.zip. It
+# cannot be rebuilt: the genre and album folders have been recurated and the label constants have changed.
+# 953 MB, and it must never be committed.
+riff_index/
+
 # Guitar Pro files anywhere, not just under data/: the collection is ~61k tabs and none of it belongs in
 # git - neither the downloaded tabs nor my own songs. The two exceptions below are code, not tabs: the
 # codec's empty template and one test fixture, both a few KB.
