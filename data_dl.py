@@ -448,7 +448,14 @@ def grab(ctx: BrowserContext, page: Page, t: Target, dest: Path,
     ctx.on("download", on_download)
 
     try:
-        button.evaluate("el => el.click()")
+        # A real mouse click, not el.click(). The site stopped acting on synthetic (untrusted) events at
+        # some point, which made every download time out as "no download event" while the button was
+        # found and pressed. The scripted click stays as the fallback, for when something on top of the
+        # button (a sale banner) makes Playwright refuse the real one.
+        try:
+            button.click(timeout=15_000)
+        except Exception:
+            button.evaluate("el => el.click()")
         deadline = time.time() + wait_s
         extra_page = None
         while time.time() < deadline and not downloads:
