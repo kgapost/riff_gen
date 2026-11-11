@@ -1,4 +1,4 @@
-"""The GP -> GP5 converter (data/convert.py): format sniffing, GP3/GP4/.gtp rewriting, the GP6/GP7 reader,
+"""The GP -> GP5 converter (data_convert.py): format sniffing, GP3/GP4/.gtp rewriting, the GP6/GP7 reader,
 what is kept, and moving unreadable files to <folder>/__erroneous."""
 
 import importlib.util
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import guitarpro as gp
 
-# data/convert.py is a stand-alone script, not part of the package
-_spec = importlib.util.spec_from_file_location("convert", Path(__file__).parents[1] / "data" / "convert.py")
+# data_convert.py is a stand-alone script at the repo root, not part of the package
+_spec = importlib.util.spec_from_file_location("convert", Path(__file__).parents[1] / "data_convert.py")
 _mod = importlib.util.module_from_spec(_spec)
 sys.modules["convert"] = _mod
 _spec.loader.exec_module(_mod)

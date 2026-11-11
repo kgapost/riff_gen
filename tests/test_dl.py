@@ -1,4 +1,4 @@
-"""data/dl.py, offline: parsing an artist page, the tab list, sorting downloads."""
+"""data_dl.py, offline: parsing an artist page, the tab list, sorting downloads."""
 
 import html
 import importlib.util
@@ -6,8 +6,8 @@ import json
 import sys
 from pathlib import Path
 
-# data/dl.py is a stand-alone script, not part of the package
-_spec = importlib.util.spec_from_file_location("dl", Path(__file__).parents[1] / "data" / "dl.py")
+# data_dl.py is a stand-alone script at the repo root, not part of the package
+_spec = importlib.util.spec_from_file_location("dl", Path(__file__).parents[1] / "data_dl.py")
 ug = importlib.util.module_from_spec(_spec)
 sys.modules["dl"] = ug
 _spec.loader.exec_module(ug)
@@ -198,7 +198,11 @@ def test_tidy_artist_swaps_only_when_sure(work):
     lib = ug.Library(work)
     assert lib.tidy_artist("Vai, Steve") == "Steve Vai"             # "Steve Vai" exists in the library
     assert lib.tidy_artist("Beatles, The") == "The Beatles"
-    assert lib.tidy_artist("Moore, Vinnie") == "Moore, Vinnie"      # nothing says which order is right
+    assert lib.tidy_artist("Renga (La)") == "La Renga"              # the article in brackets, any language
+    assert lib.tidy_artist("Moore, Vinnie") == "Vinnie Moore"       # single-word surname: swapped with no evidence
+    # ...but only then, so the cases where the order is genuinely unknowable are still left alone:
+    assert lib.tidy_artist("Van Halen, Eddie") == "Van Halen, Eddie"    # surname is two words
+    assert lib.tidy_artist("Band, Jr") == "Band, Jr"                    # "Jr" is not a first name
     assert lib.tidy_artist("Earth, Wind and Fire") == "Earth, Wind and Fire"
 
 

@@ -79,6 +79,11 @@ SOURCES = ("own", "insp", "early")                      # own: mine, the model m
 
 ALBUM_FOLDER = re.compile(r"^tabs - own - (.+) - (insp|own)$", re.I)     # the album and its source are in the folder name
 
+# The token kinds. These sat next to the old ALBUM_SUBS and were deleted with it in 78cd570; nothing
+# imports riff.py for them by name, so the module still loaded and only failed on first use - Vocab,
+# token_loss and BarWriter all touch them, which breaks prepare, train, eval and infer alike.
+K_DUR, K_NOTE, K_FX, K_TRK, K_BASS, K_DRUM, K_TS, K_SEC, K_TREM = range(1, 10)
+
 
 def album_folder(top: str):
     """'tabs - own - cs - insp' -> ('cs', 'insp'); None when the folder is not an album folder."""
@@ -656,7 +661,7 @@ class SongView:
 
 
 class Corpus:
-    """data/encoded: tokens.bin + per-bar arrays (memory-mapped) + meta.json."""
+    """data_encoded/encoded: tokens.bin + per-bar arrays (memory-mapped) + meta.json."""
 
     def __init__(self, path):
         self.dir = Path(path)

@@ -1,4 +1,4 @@
-"""data/curate.py (a local collection) and dl.py get (tab URLs), offline."""
+"""data_curate.py (a local collection) and data_dl.py get (tab URLs), offline."""
 
 import csv
 import importlib.util
@@ -9,12 +9,12 @@ from pathlib import Path
 import guitarpro as gp
 import pytest
 
-DATA = Path(__file__).parents[1] / "data"
+ROOT = Path(__file__).parents[1]
 FIXTURE = Path(__file__).parent / "fixtures" / "progmetal.gp3"
 
 
 def _load(name):
-    spec = importlib.util.spec_from_file_location(name, DATA / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, ROOT / f"data_{name}.py")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
