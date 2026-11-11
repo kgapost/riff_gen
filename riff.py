@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """RiffGen in one file: encode the tab corpus, train three models, evaluate, fill gaps, grid-search.
 
-    python riff.py prepare                          # data/tabs - */, data/__*/  ->  data/encoded/
+    python riff.py prepare                          # data/tabs - */, data/tabs - own - */  ->  data_encoded/encoded/
     python riff.py hparams                          # the calculated batch sizes and learning rates
     python riff.py train --model big                # runs/big/; evaluates every --eval-every epochs
     python riff.py eval --ckpt runs/big/best.pt     # loss and generation metrics on the fixed test gaps
@@ -66,17 +66,24 @@ MASK = 0x7FFF
 # every album is registered while its folder is still empty, and GENRE_OTHER absorbs any folder not listed, so a
 # new genre folder costs nothing. Music token ids never depend on any of this - labels go last.
 EARLY = {"generic", "exercises", "metal_generic"}       # the early years: learned from, steered away from
-ALBUMS = ("cs", "caffeine", "waves", "vc1", "vc2", "potha", "tme", "maphorion", "omni")
-GENRES = ("acoustic", "blues_soul_rnb", "classical", "doom_stoner_sludge", "electronic", "ethnic", "experimental",
-          "funk", "grunge", "jazz", "metal_groove", "metal_melodic_death", "metal_nu", "metal_thrash",
-          "metal_xtreme", "pop", "prog", "punk", "rock", "shred", "soundtracks")
+ALBUMS = ("vc1", "vc2", "caffeine", "cs", "potha", "tme", "maphorion", "omni", "waves_black", "waves_white", "inner", "popper")
+GENRES = ("acoustic", "blues_soul_rnb", "britpop", "classical", "doom_stoner_sludge", "electronic", "ethnic", "experimental",
+          "funk", "funkrock", "grunge", "jazz", "metal_classic", "metal_groove", "metal_melodic_death", "metal_modern",
+          "metal_nu", "metal_power", "metal_thrash", "metal_xtreme", "pop", "prog", "punk", "rock", "rock_classic",
+          "rock_hard", "shred", "soundtracks")
 GENRE_OTHER = "other"                                   # any genre folder not listed above
 SOURCES = ("own", "insp", "early")                      # own: mine, the model may copy it. insp: chosen as
 #                                                         inspiration, the model may learn from it but not
 #                                                         reproduce it (configs/plagiarism.yaml tiers)
-ALBUM_SUBS = {"own": "own", "insp": "insp"}             # the subfolder of __<album>/ that sets src
 
-K_DUR, K_NOTE, K_FX, K_TRK, K_BASS, K_DRUM, K_TS, K_SEC, K_TREM = range(1, 10)
+
+ALBUM_FOLDER = re.compile(r"^tabs - own - (.+) - (insp|own)$", re.I)     # the album and its source are in the folder name
+
+
+def album_folder(top: str):
+    """'tabs - own - cs - insp' -> ('cs', 'insp'); None when the folder is not an album folder."""
+    m = ALBUM_FOLDER.match(top)
+    return (re.sub(r"[^a-z0-9]+", "_", m.group(1).lower()).strip("_"), m.group(2).lower()) if m else None
 
 
 def dur_name(v: int, dot: bool, tup: int) -> str:
@@ -446,26 +453,19 @@ def family(path: Path) -> str:
     return slug(re.sub(r"\([^)]*\)|\[[^]]*\]", "", s))
 
 
-def album_src(rel) -> str:
-    """own or insp for a path under __<album>/; insp when the subfolder is missing or unrecognised."""
-    parts = Path(rel).parts if not isinstance(rel, (list, tuple)) else rel
-    return ALBUM_SUBS.get(slug(parts[1]), "insp") if len(parts) > 2 else "insp"
-
-
 def labels_of(rel: Path) -> dict:
     """Folder -> labels (README §8). The folders are the whole truth, so the same tab can sit in a genre folder
     and in any number of album folders and is labelled once per copy:
 
-        __<album>/own/...    album + src:own    mine - the model may copy it or come very close to it
-        __<album>/insp/...   album + src:insp   chosen as inspiration - it may inform, not be reproduced
+        tabs - own - <album> - own/...    album + src:own    mine - the model may copy it or come very close to it
+        tabs - own - <album> - insp/...   album + src:insp   chosen as inspiration - it may inform, not be reproduced
         tabs - <genre>/...   genre              (an unlisted folder becomes genre:other)
         the EARLY folders    src:early          the early years: learned from, steered away from
 
-    A file sitting straight in __<album>/ with no own/insp subfolder is read as insp, the safe side of that
-    distinction; cmd_prepare counts those separately (no_subfolder) so they do not pass unnoticed."""
+    The album and the source are both in the folder name, so there is no subfolder to forget."""
     top = rel.parts[0]
-    if top.startswith("__"):
-        return {"album": slug(top[2:]), "src": album_src(rel)}
+    if (af := album_folder(top)) is not None:
+        return {"album": af[0], "src": af[1]}
     name = slug(top[len("tabs - "):] if top.lower().startswith("tabs - ") else top)
     if name in EARLY:
         return {"src": "early"}
@@ -503,23 +503,22 @@ def cmd_prepare(a) -> None:
     src, out = Path(a.src), Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     folders = sorted(d for d in src.iterdir() if d.is_dir() and d.name.lower() not in ("tabs - errors", "__pycache__")
-                     and (d.name.lower().startswith("tabs - ") or d.name.startswith("__")))
+                     and d.name.lower().startswith("tabs - "))
     files = [p for d in folders for p in sorted(d.rglob("*")) if p.suffix.lower() in (".gp3", ".gp4", ".gp5")
              and not {"__erroneous", "__8string"} & set(p.parts)]
     # An album folder whose name is not registered in ALBUMS would label its tabs with a token that does not
     # exist, and Vocab.slots would quietly fall back to <none>: the tabs would train with no album label at all.
     # A misspelt folder is far likelier than a deliberate new album, so it stops here rather than an hour later.
-    if stray := sorted({d.name for d in folders if d.name.startswith("__") and slug(d.name[2:]) not in ALBUMS}):
+    if stray := sorted({d.name for d in folders if d.name.lower().startswith("tabs - own - ") and (album_folder(d.name) is None or album_folder(d.name)[0] not in ALBUMS)}):
         sys.exit(f"album folder(s) not in ALBUMS: {', '.join(stray)}\n"
                  f"known albums: {', '.join(ALBUMS)}\n"
                  f"fix the folder name, or add the album to ALBUMS in riff.py - but adding one renumbers the "
                  f"label ids, so every existing checkpoint has to be pretrained again.")
-    # The holdout songs are yours, so they belong under own/: __<album>/holdout/ would read as src:insp and the
-    # model would be told it may not copy your own song. Worth stopping for - the mistake is invisible otherwise.
+    # The holdout songs are yours, so they belong in 'tabs - own - <album> - own/holdout/': under '... - insp' they would read
+    # as src:insp and the model would be told it may not copy your own song. Worth stopping for - the mistake is invisible otherwise.
     if bad := sorted({p.relative_to(src).parts[0] for p in files
-                      if p.relative_to(src).parts[0].startswith("__")
-                      and len(p.relative_to(src).parts) > 2 and slug(p.relative_to(src).parts[1]) == "holdout"}):
-        sys.exit(f"holdout songs directly under {', '.join(bad)}: move them to <album>/own/holdout/, "
+                      if (af := album_folder(p.relative_to(src).parts[0])) and af[1] == "insp" and "holdout" in p.relative_to(src).parts}):
+        sys.exit(f"holdout songs under {', '.join(bad)}: move them to 'tabs - own - <album> - own/holdout/', "
                  f"otherwise they are labelled src:insp (inspiration) instead of src:own.")
     excl = [s.strip() for s in a.exclude.split(",") if s.strip()]
     if excl:
@@ -563,8 +562,6 @@ def cmd_prepare(a) -> None:
                 skips["more versions of one song"] += 1
                 continue
             fams[parts[0], r["family"]] += 1
-            if parts[0].startswith("__") and (len(parts) < 3 or slug(parts[1]) not in ALBUM_SUBS):
-                notes["album files with no own/insp subfolder (read as insp)"] += 1
             fh.write(r["tokens"].astype(np.uint16).tobytes())
             lens.append(r["lens"])
             for k in feats:
@@ -579,7 +576,7 @@ def cmd_prepare(a) -> None:
     # different copy on every run. The order is fixed and prefers the plain genre copy, so a tab assigned to an
     # album is scored as corpus material and the album sets stay out of the evaluation entirely.
     seen, copies = {}, Counter()
-    for s in sorted(songs, key=lambda s: (s["file"].startswith("__"), s["file"])):
+    for s in sorted(songs, key=lambda s: (s["file"].startswith("tabs - own - "), s["file"])):
         d = s.pop("_digest")
         copies[d] += 1
         if d in seen:
@@ -2895,7 +2892,7 @@ def cmd_infer(a) -> None:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    data = str(ROOT / "data" / "encoded")
+    data = str(ROOT / "data_encoded" / "encoded")
     p = sub.add_parser("prepare", help="1) split, curate and encode the corpus")
     p.add_argument("--src", default=str(ROOT / "data"))
     p.add_argument("--out", default=data)

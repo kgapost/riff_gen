@@ -47,7 +47,7 @@ repeat sign is filled in pieces, each on its first pass.
 
 **2. Input / output.** GP5 is used because MIDI loses strings, frets,
 techniques and tuning. Files are read and written with PyGuitarPro; GP3 and
-GP4 are read too, and GP6/GP7 files are converted with `data/convert.py`
+GP4 are read too, and GP6/GP7 files are converted with `data_convert.py`
 (see [Collecting tabs](#collecting-tabs)). The model reads drums and bass as
 context. In training they are dropped 15 % of the time each, so the model
 also works on guitar-only songs. Up to four guitar tracks are kept (`G_SLOTS`);
@@ -203,13 +203,13 @@ attention.
 - `src:early` for the early-years folders (`generic`, `exercises`,
   `metal generic`; edit `EARLY` in riff.py);
 - `album:<id>` plus `src:own` for your own songs in
-  `data/__<album>/own/`, and `album:<id>` plus `src:insp` for the tabs you
-  assign to that album as inspiration, in `data/__<album>/insp/`.
+  `data/tabs - own - <album> - own/`, and `album:<id>` plus `src:insp` for the tabs you
+  assign to that album as inspiration, in `data/tabs - own - <album> - insp/`.
 
 The two sources of an album are a deliberate distinction: the model may copy
 from `src:own` or come very close to it, but may only be informed by
 `src:insp`, never reproduce it (§15). A file put
-straight in `data/__<album>/` with no subfolder is read as `insp`, the safe
+straight in `data/tabs - own - <album> - insp/ or - own/` with no subfolder is read as `insp`, the safe
 side, and counted in `prepare`'s report.
 
 The label vocabulary is built from the constants in riff.py (`ALBUMS`,
@@ -308,7 +308,7 @@ skipped, so a stopped grid continues.
 `--lora 16` freezes the model and adds rank-16 updates to every attention
 and MLP projection; the token and label embeddings train too. Add replay
 from the album's genres with `--focus`, and keep the checkpoint with the
-lowest loss on the held-out songs (`data/__<album>/own/holdout/` goes to
+lowest loss on the held-out songs (`data/tabs - own - <album> - own/holdout/` goes to
 validation).
 
 **14. Candidates.** Each candidate is sampled with temperature and top-p
@@ -472,34 +472,51 @@ changes the originals.
 - Ranking by likelihood prefers safe, repetitive riffs: the copy reject, the
   `rel:copy` / `rel:chug` guidance and temperature counter that.
 
+## Getting the tabs (Drive backup)
+
+The tab collection (`data/tabs - */`, about 56.6k Guitar Pro files, 2.9 GB, 196 MB zipped) is **not in git**: the tabs are
+other people's transcriptions. It is kept as three zip files plus `tabs_manifest.json` in a private Google Drive folder
+(<https://drive.google.com/drive/folders/12636du_4adjeTp9BEyaGzSNEqL9PIedN>). On a new machine:
+
+```
+pip install gdown
+python data_tabs.py fetch              # downloads the Drive folder to data_encoded/tabs_backup/ and unzips it into data/
+python data_tabs.py fetch --from DIR   # the same from zips you downloaded by hand (DIR holds tabs_part*.zip)
+python data_tabs.py verify             # file counts per folder against tabs_manifest.json
+```
+
+After the collection changed, `python data_tabs.py pack` rebuilds the zips and the manifest in `data_encoded/tabs_backup/`;
+upload them to the Drive folder (replace the old files). The encoded corpora (`data_encoded/encoded*`) are not backed up:
+`python riff.py prepare` rebuilds them from the tabs.
+
 ## Collecting tabs
 
-The tab tools live in `data/`, outside the package: `data/dl.py` collects
-tabs and `data/convert.py` turns them into GP5.
+The tab tools live next to `riff.py`, outside the package: `data_dl.py` collects
+tabs and `data_convert.py` turns them into GP5.
 
-`python data/dl.py list <artist URL>` adds the free community Guitar Pro tabs
+`python data_dl.py list <artist URL>` adds the free community Guitar Pro tabs
 rated above 4.4 from public artist pages to `data/list.csv`. It needs no
 account, waits 7.5–15 s between requests and stops at the first refusal.
 
-`python data/dl.py` drives a real Chromium through `data/list.csv` (one row
+`python data_dl.py` drives a real Chromium through `data/list.csv` (one row
 per tab id with its status) and presses each tab's Download button. Log in with
-`UG_USER` / `UG_PASSWORD`; the profile in `data/profile` keeps the login.
+`UG_USER` / `UG_PASSWORD`; the profile in `data_encoded/profile` keeps the login.
 Files land in `data/tabs - generic/` as `Artist - Song[__vN][__id].ext`.
 File headers are checked, and HTML pages go to `data/errors/`. It pauses
 2.5–5 s per tab and longer every 100 and 1000 tabs, stops when the site
 reports a download limit, and resumes from `data/state.json`
 (`--retry-failed`, `--only-first N`, `--report`).
 
-`python data/dl.py get <tab URL | artist URL> ...` downloads one tab, or every
+`python data_dl.py get <tab URL | artist URL> ...` downloads one tab, or every
 song of a band (the best-rated free community Guitar Pro version of each song
 not on disk yet), the same way, and records them in `data/list.csv`.
 
-`python data/curate.py <files or folders> --out <folder>` applies the same
+`python data_curate.py <files or folders> --out <folder>` applies the same
 curation rules to a collection of your own, leaving the originals alone
 (`--genre-folders`, `--move`); it writes `curate_report.csv` in `--out`.
 
-Afterwards `python data/dl.py sort --manifest data/state.json ...` renames
-the downloads after the list and files them, and `python data/convert.py`
+Afterwards `python data_dl.py sort --manifest data/state.json ...` renames
+the downloads after the list and files them, and `python data_convert.py`
 converts GP3/4/6/7/8 to GP5 in `data/gp5/`. Every output is read back and compared.
 Unreadable files, GP1/2 files and 8-string songs are moved to `__erroneous`
 or `__8string`.
@@ -509,9 +526,9 @@ own account, which is what is at risk, and a daily quota may end long runs.
 
 ## Before you start
 
-- Put your own songs in `data/__<album>/own/` and 1–2 of them per album in
-  `data/__<album>/own/holdout/`; put the tabs you want that album to be
-  inspired by in `data/__<album>/insp/`. The album folder must be named
+- Put your own songs in `data/tabs - own - <album> - own/` and 1–2 of them per album in
+  `data/tabs - own - <album> - own/holdout/`; put the tabs you want that album to be
+  inspired by in `data/tabs - own - <album> - insp/`. The album folder must be named
   after an album in `ALBUMS`.
 - Mark gaps with 5 or more empty measures in all guitar tracks, with the
   right time signatures. A marker such as "Bridge" helps.
@@ -523,7 +540,7 @@ Install PyTorch for your GPU first (`cu128` for RTX 30/40, `cu126` for the
 GTX 1650), then `pip install -e ".[dev]"`.
 
 ```bash
-python riff.py prepare                       # 1) split, curate, encode: data/tabs - */, data/__*/ -> data/encoded/
+python riff.py prepare                       # 1) split, curate, encode: data/tabs - */, data/tabs - own - */ -> data_encoded/encoded/
 python riff.py hparams                       # the calculated batch sizes and learning rates
 python riff.py grid                          # 5) 3 models x 3 batch sizes x 3 learning rates, 100M tokens each
 python riff.py train --model big             # 2) train; 3) evaluates every --eval-every 0.5 epochs

@@ -20,7 +20,7 @@
 # grid moves one thing at a time.
 #
 # Everything that decides the validation loss is pinned to the Nov 5 values, so the new rows and the 84 old
-# ones belong in one table: the same corpus (data/encoded_grid, untouched since Oct 30 - re-preparing it
+# ones belong in one table: the same corpus (data_encoded/encoded_grid, untouched since Oct 30 - re-preparing it
 # would change the gaps and the fit and void the old rows), the same 410.2M-token budget, the same 400
 # evaluation gaps, the same eval cadence and the same seed. --micro-tokens 16384 reproduces the micro-batch
 # the baseline runs used (its model default has since changed to 32768); huge's default 49152 already
@@ -44,7 +44,7 @@
 set -u
 cd "$(dirname "$0")"
 
-COMMON="--data data/encoded_grid --out runs/grid2 --budget 410200000
+COMMON="--data data_encoded/encoded_grid --out runs/grid2 --budget 410200000
         --eval-gaps 400 --eval-every 0.125 --seed 1234 --workers 4"
 BASE="--models baseline --micro-tokens 16384 --ckpt"
 HUGE="--models huge --aux 0.1"
