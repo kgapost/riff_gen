@@ -555,6 +555,69 @@ scaling (deliberately never probed — `encoded_grid` held half the tokens, so
 transferred), and lr × batch if the corpus moves the optimum, which encoding
 every pitched part may well have done.
 
+## What the first full training run found (2026-11-13 to 11-15)
+
+Three stages on iti-1261, 46 GPU-hours on one RTX 4090: pretrain (A), 28
+genre fine-tunes (B), 13 album LoRA fine-tunes (C). Drivers and per-run
+summaries are in [`runs/`](runs/) — the scripts and `*_summary.csv` are
+tracked even though the checkpoints are not.
+
+**Stage A worked.** 8 epochs, 3,904 M tokens, 17.4 h at 62k tok/s, using the
+grid's winning cell (baseline, ctx 4096, batch 16384, lr 3.74e-04, dropout 0,
+no smoothing, no focal). Validation improved at all 8 evaluations, ending
+0.1937; the held-out test split gave loss **0.2074**, acc 0.9418, `loss_cmp`
+**0.4735**. Test ≈ val on `loss_cmp` (0.4735 vs 0.4718), so it generalises.
+Epoch 8 bought 0.0005, well under the 0.0036 seed-noise floor — 8 epochs is
+enough.
+
+**Stage B failed, and the reason is the learning rate.** Full fine-tuning
+each genre at lr 1e-4 made **26 of 28 genres worse on their own songs**; only
+`classical` improved (0.3677 → 0.3410). 1e-4 was chosen as "well below the
+pretraining 3.74e-04", but the rate that matters is the one training *ended*
+at: `lr_at(frac, peak, warm=0.02, floor=0.1)` decays to a tenth, so stage A
+finished at **3.74e-05** and stage B warmed back up to **2.7× that**. The
+evidence is that every run's *first* evaluation was already worse than the
+pretrained 0.1937 (acoustic 0.2012, rock 0.2025, prog 0.2007): the damage
+happened during the warm-up, before any genre-specific learning could pay for
+it.
+
+**Stage C succeeded at a rate 3.7× higher**, which is the same fact seen from
+the other side. `--lora` freezes the base weights, so the learning rate cannot
+overwrite what pretraining learned and the zero-initialised adapters need a
+real rate. vc2 0.0877 → 0.0521, caffeine 0.1968 → 0.1464, waves_black
+0.0727 → 0.0661.
+
+So: **fine-tune a label with LoRA, not with full weights.** A full fine-tune
+on a label that is a few per cent of the corpus has enough capacity to
+overwrite general musical structure and nothing telling it not to.
+
+Three further conclusions, all of which cost something this time:
+
+- **`best.pt` selects on the wrong thing for a fine-tune.** `train_run` keeps
+  the checkpoint with the lowest loss on the *whole* validation split, which
+  for a genre run is ~96 % other genres. `genre_acoustic` improved globally
+  (0.2012 → 0.1976) while getting *worse* on acoustic itself (0.2501 →
+  0.2598). [`runs/label_best_watcher.py`](runs/label_best_watcher.py) scores
+  each evaluation checkpoint on the tuned label's own val gaps and keeps
+  `label_best.pt`; it beat `best.pt` on 8 of the 9 albums it covered. Start it
+  with the stage, not partway through.
+- **Most of the album validation sets are too thin to judge.** cs, omni, inner
+  and waves_black have **2 val gaps each**; tme and maphorion start at
+  0.0007–0.0052, already memorised. Only vc2 (12) and hh (18) are honest.
+  §13's per-album `holdout/` folder is the fix and **no album has one**, so
+  all 13 silently fell back to the normal split.
+- **`insp` folders can evaluate to nothing.** `fixed_gaps` skips songs flagged
+  `dup`, and album `insp` folders are largely cross-folder copies (prepare
+  found 2,946), so vc1, popper and waves_white produced **zero** album val
+  gaps. popper and waves_white also have zero `own` tabs.
+
+Stage B2 ([`runs/run_stage_b2.sh`](runs/run_stage_b2.sh),
+[`runs/schedule_b2.py`](runs/schedule_b2.py)) re-runs the genres as LoRA
+adapters at 3.74e-04, with rank 32 for the nine largest genres, twice the
+evaluation density, and a larger budget — the first stage B gave every genre
+only ~4.0 passes over its own tokens (`budget × share / T_g`), which is thin
+for adapters starting from zero.
+
 ## Pitfalls handled
 
 - Repeats: `repeatClose` counts *extra* passes, and `repeatAlternative` is a

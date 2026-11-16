@@ -1,0 +1,455 @@
+{
+ "T_all": 488015011,
+ "n_train": 59115,
+ "genres": {
+  "acoustic": {
+   "n_train_songs": 2359,
+   "T_g": 8654644,
+   "W": 37,
+   "budget": 86546440,
+   "epoch_tokens_focused": 730968667.0,
+   "eval_every": 0.0148,
+   "share": 0.4
+  },
+  "blues_soul_rnb": {
+   "n_train_songs": 1588,
+   "T_g": 8694769,
+   "W": 37,
+   "budget": 86947690,
+   "epoch_tokens_focused": 732413167.0,
+   "eval_every": 0.01484,
+   "share": 0.402
+  },
+  "britpop": {
+   "n_train_songs": 1357,
+   "T_g": 11901993,
+   "W": 27,
+   "budget": 119019930,
+   "epoch_tokens_focused": 728853301.0,
+   "eval_every": 0.02041,
+   "share": 0.403
+  },
+  "classical": {
+   "n_train_songs": 1374,
+   "T_g": 3469487,
+   "W": 94,
+   "budget": 34694870,
+   "epoch_tokens_focused": 742063774.0,
+   "eval_every": 0.00584,
+   "share": 0.402
+  },
+  "doom_stoner_sludge": {
+   "n_train_songs": 772,
+   "T_g": 7601067,
+   "W": 42,
+   "budget": 76010670,
+   "epoch_tokens_focused": 731045230.0,
+   "eval_every": 0.013,
+   "share": 0.399
+  },
+  "electronic": {
+   "n_train_songs": 549,
+   "T_g": 3927991,
+   "W": 83,
+   "budget": 39279910,
+   "epoch_tokens_focused": 741496745.0,
+   "eval_every": 0.00662,
+   "share": 0.402
+  },
+  "ethnic": {
+   "n_train_songs": 940,
+   "T_g": 6516913,
+   "W": 50,
+   "budget": 65169130,
+   "epoch_tokens_focused": 738730220.0,
+   "eval_every": 0.01103,
+   "share": 0.404
+  },
+  "experimental": {
+   "n_train_songs": 549,
+   "T_g": 4443881,
+   "W": 73,
+   "budget": 44438810,
+   "epoch_tokens_focused": 739360915.0,
+   "eval_every": 0.00751,
+   "share": 0.402
+  },
+  "funk": {
+   "n_train_songs": 195,
+   "T_g": 1393340,
+   "W": 100,
+   "budget": 20000000,
+   "epoch_tokens_focused": 557342143.0,
+   "eval_every": 0.00449,
+   "share": 0.223
+  },
+  "funkrock": {
+   "n_train_songs": 673,
+   "T_g": 4890398,
+   "W": 66,
+   "budget": 48903980,
+   "epoch_tokens_focused": 737277353.0,
+   "eval_every": 0.00829,
+   "share": 0.401
+  },
+  "grunge": {
+   "n_train_songs": 1249,
+   "T_g": 9844726,
+   "W": 33,
+   "budget": 98447260,
+   "epoch_tokens_focused": 734432715.0,
+   "eval_every": 0.01676,
+   "share": 0.405
+  },
+  "jazz": {
+   "n_train_songs": 868,
+   "T_g": 3304535,
+   "W": 98,
+   "budget": 33045350,
+   "epoch_tokens_focused": 739941378.0,
+   "eval_every": 0.00558,
+   "share": 0.401
+  },
+  "metal_classic": {
+   "n_train_songs": 1871,
+   "T_g": 19205064,
+   "W": 16,
+   "budget": 192050640,
+   "epoch_tokens_focused": 707477443.0,
+   "eval_every": 0.03393,
+   "share": 0.396
+  },
+  "metal_groove": {
+   "n_train_songs": 776,
+   "T_g": 9192534,
+   "W": 35,
+   "budget": 91925340,
+   "epoch_tokens_focused": 731947639.0,
+   "eval_every": 0.0157,
+   "share": 0.402
+  },
+  "metal_melodic_death": {
+   "n_train_songs": 875,
+   "T_g": 11001956,
+   "W": 29,
+   "budget": 110019560,
+   "epoch_tokens_focused": 727456251.0,
+   "eval_every": 0.0189,
+   "share": 0.401
+  },
+  "metal_modern": {
+   "n_train_songs": 1531,
+   "T_g": 18023775,
+   "W": 17,
+   "budget": 180237750,
+   "epoch_tokens_focused": 707781883.0,
+   "eval_every": 0.03183,
+   "share": 0.395
+  },
+  "metal_nu": {
+   "n_train_songs": 1377,
+   "T_g": 11015779,
+   "W": 29,
+   "budget": 110157790,
+   "epoch_tokens_focused": 727843295.0,
+   "eval_every": 0.01892,
+   "share": 0.401
+  },
+  "metal_power": {
+   "n_train_songs": 1485,
+   "T_g": 17830088,
+   "W": 18,
+   "budget": 178300880,
+   "epoch_tokens_focused": 722512979.0,
+   "eval_every": 0.03085,
+   "share": 0.406
+  },
+  "metal_thrash": {
+   "n_train_songs": 1187,
+   "T_g": 15663523,
+   "W": 20,
+   "budget": 156635230,
+   "epoch_tokens_focused": 717008420.0,
+   "eval_every": 0.02731,
+   "share": 0.399
+  },
+  "metal_xtreme": {
+   "n_train_songs": 2802,
+   "T_g": 39889378,
+   "W": 8,
+   "budget": 398893780,
+   "epoch_tokens_focused": 698627129.0,
+   "eval_every": 0.07137,
+   "share": 0.416
+  },
+  "pop": {
+   "n_train_songs": 1308,
+   "T_g": 8505251,
+   "W": 38,
+   "budget": 85052510,
+   "epoch_tokens_focused": 734095770.0,
+   "eval_every": 0.01448,
+   "share": 0.403
+  },
+  "prog": {
+   "n_train_songs": 2883,
+   "T_g": 31624689,
+   "W": 10,
+   "budget": 316246890,
+   "epoch_tokens_focused": 704023684.0,
+   "eval_every": 0.05615,
+   "share": 0.409
+  },
+  "punk": {
+   "n_train_songs": 2402,
+   "T_g": 21060328,
+   "W": 15,
+   "budget": 210603280,
+   "epoch_tokens_focused": 714246075.0,
+   "eval_every": 0.03686,
+   "share": 0.404
+  },
+  "rock": {
+   "n_train_songs": 4714,
+   "T_g": 36752062,
+   "W": 8,
+   "budget": 367520620,
+   "epoch_tokens_focused": 676665917.0,
+   "eval_every": 0.06789,
+   "share": 0.395
+  },
+  "rock_classic": {
+   "n_train_songs": 2292,
+   "T_g": 18280372,
+   "W": 17,
+   "budget": 182803720,
+   "epoch_tokens_focused": 711887435.0,
+   "eval_every": 0.0321,
+   "share": 0.398
+  },
+  "rock_hard": {
+   "n_train_songs": 1698,
+   "T_g": 13029518,
+   "W": 24,
+   "budget": 130295180,
+   "epoch_tokens_focused": 719080397.0,
+   "eval_every": 0.02265,
+   "share": 0.397
+  },
+  "shred": {
+   "n_train_songs": 1202,
+   "T_g": 7837282,
+   "W": 41,
+   "budget": 78372820,
+   "epoch_tokens_focused": 732892763.0,
+   "eval_every": 0.01337,
+   "share": 0.401
+  },
+  "soundtracks": {
+   "n_train_songs": 2294,
+   "T_g": 10536180,
+   "W": 30,
+   "budget": 105361800,
+   "epoch_tokens_focused": 724950703.0,
+   "eval_every": 0.01817,
+   "share": 0.398
+  }
+ },
+ "albums": {
+  "vc1": {
+   "n_own": 66,
+   "n_insp": 232,
+   "T_a": 2995405,
+   "W": 162,
+   "budget": 89862150,
+   "replay_genres": [
+    "prog",
+    "rock_classic",
+    "britpop"
+   ],
+   "epoch_tokens_focused": 1032082270.0,
+   "eval_every": 0.01088,
+   "share": 0.5
+  },
+  "vc2": {
+   "n_own": 137,
+   "n_insp": 340,
+   "T_a": 4325342,
+   "W": 112,
+   "budget": 129760260,
+   "replay_genres": [
+    "prog",
+    "rock_classic",
+    "britpop"
+   ],
+   "epoch_tokens_focused": 1029935027.0,
+   "eval_every": 0.01575,
+   "share": 0.5
+  },
+  "caffeine": {
+   "n_own": 142,
+   "n_insp": 141,
+   "T_a": 1856504,
+   "W": 262,
+   "budget": 55695120,
+   "replay_genres": [
+    "rock_classic",
+    "rock",
+    "metal_nu"
+   ],
+   "epoch_tokens_focused": 1038610768.0,
+   "eval_every": 0.0067,
+   "share": 0.5
+  },
+  "cs": {
+   "n_own": 63,
+   "n_insp": 162,
+   "T_a": 2066669,
+   "W": 235,
+   "budget": 62000070,
+   "replay_genres": [
+    "doom_stoner_sludge",
+    "metal_groove",
+    "grunge"
+   ],
+   "epoch_tokens_focused": 998253884.0,
+   "eval_every": 0.00776,
+   "share": 0.5
+  },
+  "potha": {
+   "n_own": 62,
+   "n_insp": 166,
+   "T_a": 2376375,
+   "W": 204,
+   "budget": 71291250,
+   "replay_genres": [
+    "prog",
+    "metal_xtreme",
+    "metal_modern"
+   ],
+   "epoch_tokens_focused": 1059956978.0,
+   "eval_every": 0.00841,
+   "share": 0.5
+  },
+  "tme": {
+   "n_own": 55,
+   "n_insp": 200,
+   "T_a": 3711890,
+   "W": 130,
+   "budget": 111356700,
+   "replay_genres": [
+    "metal_xtreme",
+    "prog",
+    "classical"
+   ],
+   "epoch_tokens_focused": 1041832375.0,
+   "eval_every": 0.01336,
+   "share": 0.499
+  },
+  "maphorion": {
+   "n_own": 56,
+   "n_insp": 202,
+   "T_a": 3914078,
+   "W": 124,
+   "budget": 117422340,
+   "replay_genres": [
+    "metal_xtreme",
+    "metal_modern",
+    "metal_melodic_death"
+   ],
+   "epoch_tokens_focused": 1038361714.0,
+   "eval_every": 0.01414,
+   "share": 0.501
+  },
+  "omni": {
+   "n_own": 50,
+   "n_insp": 60,
+   "T_a": 683824,
+   "W": 300,
+   "budget": 20514720,
+   "replay_genres": [
+    "rock_classic",
+    "prog",
+    "jazz"
+   ],
+   "epoch_tokens_focused": 745687983.0,
+   "eval_every": 0.00344,
+   "share": 0.296
+  },
+  "waves_black": {
+   "n_own": 43,
+   "n_insp": 212,
+   "T_a": 3405225,
+   "W": 142,
+   "budget": 102156750,
+   "replay_genres": [
+    "metal_xtreme",
+    "prog",
+    "experimental"
+   ],
+   "epoch_tokens_focused": 1044109684.0,
+   "eval_every": 0.01223,
+   "share": 0.499
+  },
+  "waves_white": {
+   "n_own": 0,
+   "n_insp": 131,
+   "T_a": 1279919,
+   "W": 300,
+   "budget": 38397570,
+   "replay_genres": [
+    "britpop",
+    "rock",
+    "prog"
+   ],
+   "epoch_tokens_focused": 950989536.0,
+   "eval_every": 0.00505,
+   "share": 0.441
+  },
+  "inner": {
+   "n_own": 50,
+   "n_insp": 132,
+   "T_a": 1720111,
+   "W": 283,
+   "budget": 51603330,
+   "replay_genres": [
+    "prog",
+    "electronic",
+    "metal_nu"
+   ],
+   "epoch_tokens_focused": 1019654772.0,
+   "eval_every": 0.00633,
+   "share": 0.5
+  },
+  "popper": {
+   "n_own": 0,
+   "n_insp": 566,
+   "T_a": 4898459,
+   "W": 99,
+   "budget": 146953770,
+   "replay_genres": [
+    "pop",
+    "rock",
+    "rock_classic"
+   ],
+   "epoch_tokens_focused": 1031601678.0,
+   "eval_every": 0.01781,
+   "share": 0.501
+  },
+  "hh": {
+   "n_own": 42,
+   "n_insp": 771,
+   "T_a": 4922777,
+   "W": 98,
+   "budget": 147683310,
+   "replay_genres": [
+    "funk",
+    "pop",
+    "electronic"
+   ],
+   "epoch_tokens_focused": 979350962.0,
+   "eval_every": 0.01885,
+   "share": 0.5
+  }
+ }
+}

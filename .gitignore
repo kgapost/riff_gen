@@ -59,7 +59,15 @@ ngram_*.json
 *.ogg
 
 # ---------------------------------------------------------------- training and generation outputs
-runs/
+# runs/ holds checkpoints and logs, which stay local - but the drivers and schedules that produced them
+# are code and belong in git. "runs/*" rather than "runs/" so these negations can re-include files: git
+# never descends into an ignored DIRECTORY, so the negations would be dead under a plain "runs/".
+# Subdirectories (runs/logs/, runs/<run>/) stay ignored, which keeps *.pt out regardless.
+runs/*
+!runs/*.py
+!runs/*.sh
+!runs/*_summary.csv
+!runs/schedule*.json
 outputs/
 reports/*
 
