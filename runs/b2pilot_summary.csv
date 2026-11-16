@@ -1,1 +1,3 @@
 genre,n_train_songs,T_g,lora,W,budget,passes,base_val_loss,tuned_val_loss,label_best_loss,minutes,status
+classical,1374,3469487,16,94,104084610,13.18,0.3677,0.3497,,64,ok
+acoustic,2359,8654644,16,37,259639320,13.14,0.2501,0.2531,,116,ok

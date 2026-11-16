@@ -98,7 +98,7 @@ def main() -> int:
         # a fresh evaluation checkpoint: score it on the label's own val gaps
         time.sleep(3)                                     # let the rename settle
         try:
-            model, V, cfg, _ = riff.load_ckpt(ck, dev)
+            model, V, cfg, src = riff.load_ckpt(ck, dev)
         except Exception as e:                            # a half-written file, or vocabulary mismatch
             print(f"[{time.strftime('%F %T')}] {label}: cannot load last.pt ({e}); retrying", flush=True)
             time.sleep(POLL)
@@ -126,8 +126,13 @@ def main() -> int:
         mark = ""
         if loss < best.get(key, float("inf")):
             best[key] = loss
+            # The rank MUST come from the checkpoint we loaded, not from the model object: there is no
+            # _lora_rank attribute on it, so the old getattr(...) default wrote lora=0 into every saved
+            # file. load_ckpt then rebuilt a plain model and refused the LoRA state dict, which made each
+            # label_best.pt unloadable - the stage C ones included (their logged losses are still valid,
+            # the files just could not be opened; runs/repair_label_best.py fixes them in place).
             ckobj = {"cfg": cfg, "tokens": V.tokens, "model": model.state_dict(),
-                     "lora": getattr(model, "_lora_rank", 0) or 0, "state": {"label_loss": loss}}
+                     "lora": src.get("lora", 0), "state": {"label_loss": loss}}
             tmp = run / "label_best.tmp"
             torch.save(ckobj, tmp)
             shutil.move(str(tmp), str(run / "label_best.pt"))
