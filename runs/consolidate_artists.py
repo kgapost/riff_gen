@@ -39,14 +39,24 @@ EXT = {".gp3", ".gp4", ".gp5"}
 
 # artist field (lowercased) -> destination genre folder name as it appears on disk
 PLAN = {
+    # first pass, 2026-11-17
     "nevermore": "tabs - metal xtreme",
     "van halen": "tabs - shred",
     "allan holdsworth": "tabs - experimental",
     "frank zappa": "tabs - experimental",
     "opeth": "tabs - prog",
+    # second pass
+    "buckethead": "tabs - experimental",
+    "lacuna coil": "tabs - metal nu",
+    "ironfist": "tabs - metal classic",
+    "liquid tension experiment": "tabs - shred",
+    "rob scallon": "tabs - acoustic",
+    "dance gavin dance": "tabs - metal modern",
 }
-# genre folders that are not really genres; left alone
-NOT_GENRES = {"tabs - generic", "tabs - exercises", "tabs - errors"}
+# Folders that start with "tabs - " but are not genres: none of them is in riff.GENRES, so prepare labels
+# their tabs "other" (12,241 files, 20% of the corpus). They are left alone here - "tabs - exercises" holds
+# technique studies that are genre-less on purpose, and sorting "generic" is a curation job, not a move.
+NOT_GENRES = {"tabs - generic", "tabs - exercises", "tabs - errors", "tabs - metal generic"}
 
 
 def genre_folders() -> list[Path]:
