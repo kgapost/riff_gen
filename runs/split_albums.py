@@ -54,6 +54,14 @@ MIN_BARS = 400          # candidate threshold: 4x the 102-bar median song
 MIN_SEG = 32            # a track shorter than this is implausible; such a split is rejected
 MIN_TRACKS = 2
 
+# A filename keyword is the only RELIABLE album signal. Bar statistics cannot tell a 4-track album from a
+# 15-minute progressive song with four named sections - both are 500 bars with four markers 100+ bars
+# apart. "Gallowbraid - Ashen Eidolon" and "Jinjer - Inhale Dont Breathe" are single songs that the
+# segment-length rule happily proposed splitting into 4 and 7 "tracks". With --confident, only files whose
+# NAME says they are a compilation get split automatically; the rest are listed for a human to judge.
+ALBUMISH = re.compile(r"\b(medley|best of|part ?\d|pt\.? ?\d|album|discography|collection|trilogy|"
+                      r"compilation|full album|anthology|greatest hits|side [ab]\b)\b", re.I)
+
 SECTION = re.compile(
     r"^\W*(intro|outro|verse|chorus|pre[\s-]?chorus|post[\s-]?chorus|bridge|solo|riff|instrumental|"
     r"interlude|break(down)?|coda|refrain|ending|theme|vamp|hook|fill|link|tag|head|build|drop|"
@@ -79,6 +87,11 @@ def plan_for(p: Path):
     except Exception as e:
         return "error", f"parse failed: {e}", []
     n = len(song.measureHeaders)
+    # The csv's bar counts come from the ENCODED corpus, where repeats are expanded, so a 107-measure file
+    # can show 400+ encoded bars. Album-ness is a property of the written score, so the raw measure count
+    # decides: without this check the plan happily "split" a 107-measure file into 2 "tracks".
+    if n < MIN_BARS:
+        return "skip", f"only {n} raw measures (the csv counts repeat-expanded bars)", []
     marks = [(i, (m.marker.title or "").strip()) for i, m in enumerate(song.measureHeaders) if m.marker]
     if not marks:
         return "skip", f"{n} bars, no markers", []
@@ -111,20 +124,43 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--review", action="store_true")
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--confident", action="store_true",
+                    help="only split files whose NAME says they are an album/medley/part (see ALBUMISH)")
     ap.add_argument("--limit", type=int)
     a = ap.parse_args()
 
-    folders = [d for d in DATA.iterdir() if d.is_dir() and d.name.lower().startswith("tabs - ")]
-    cands = []
-    for d in folders:
-        for p in sorted(d.rglob("*")):
-            if p.suffix.lower() not in EXT:
+    # Candidates come from runs/tab_quality.csv, which already holds every song's bar count. The first
+    # version of this parsed all ~60,000 files with gp.parse just to find the long ones and was killed by
+    # its own 50-minute timeout having printed nothing. Paths in that csv predate the moves and the cull,
+    # so each is resolved by BASENAME against what is on disk now.
+    qcsv = riff.ROOT / "runs" / "tab_quality.csv"
+    if not qcsv.is_file():
+        sys.exit(f"{qcsv} missing - run runs/tab_quality.py --csv {qcsv} first")
+    ondisk = {}
+    for d in DATA.iterdir():
+        # Album folders are excluded, as everywhere else in this cleanup: those are the user's own songs
+        # and their chosen inspirations, and splitting one would silently rewrite an album assignment.
+        # Three candidates do sit there (Pain Of Salvation - Icon under vc2 - insp among them); they are
+        # reported by --review and left alone.
+        if (d.is_dir() and d.name.lower().startswith("tabs - ")
+                and not d.name.lower().startswith("tabs - own - ")):
+            for p in d.rglob("*"):
+                if p.suffix.lower() in EXT:
+                    ondisk.setdefault(p.name, p)
+    import csv as _csv
+    cands, missing = [], 0
+    with open(qcsv, encoding="utf-8") as fh:
+        for row in _csv.DictReader(fh):
+            if int(row["bars"]) < MIN_BARS:
                 continue
-            try:
-                if len(gp.parse(str(p)).measureHeaders) >= MIN_BARS:
-                    cands.append(p)
-            except Exception:
-                pass
+            p = ondisk.get(Path(row["file"]).name)
+            if p is None:
+                missing += 1
+            else:
+                cands.append(p)
+    cands = sorted(set(cands))
+    if missing:
+        print(f"({missing} long files from the csv are no longer on disk - moved or culled)")
     if a.limit:
         cands = cands[:a.limit]
     print(f"{len(cands)} files with {MIN_BARS}+ bars\n", flush=True)
@@ -133,6 +169,8 @@ def main() -> int:
     plans = []
     for p in cands:
         v, why, segs = plan_for(p)
+        if v == "split" and a.confident and not ALBUMISH.search(p.stem):
+            v, why = "review", why + " - but the name does not say album/medley, could be one long song"
         verdicts[v] += 1
         plans.append((p, v, why, segs))
         if a.review or v in ("review", "error"):
