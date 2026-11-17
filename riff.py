@@ -498,17 +498,29 @@ def labels_of(rel: Path) -> dict:
 
         tabs - own - <album> - own/...    album + src:own    mine - the model may copy it or come very close to it
         tabs - own - <album> - insp/...   album + src:insp   chosen as inspiration - it may inform, not be reproduced
-        tabs - <genre>/...   genre              (an unlisted folder becomes genre:other)
+        tabs - <genre>/...   genre              (an unlisted folder gets NO genre label at all)
         the EARLY folders    src:early          the early years: learned from, steered away from
 
-    The album and the source are both in the folder name, so there is no subfolder to forget."""
+    The album and the source are both in the folder name, so there is no subfolder to forget.
+
+    A folder that is not in GENRES - "tabs - generic" (9,525 tabs), "tabs - exercises" (1,656) and
+    "tabs - metal generic" (1,060), 20 % of the corpus - used to be labelled genre:other. It is now left
+    unlabelled, so those tabs train the model in stage A and contribute to no genre label anywhere.
+    genre:other was a category only in the sense that it meant "not sorted yet": one embedding shared by
+    9,525 unrelated songs taught the model nothing it could use, and it was a label a person could
+    accidentally condition on at inference.
+
+    GENRE_OTHER deliberately STAYS in the vocabulary (the token list at Vocab construction is unchanged).
+    Removing it would renumber every label id, and --init refuses a checkpoint whose token list differs,
+    so runs/final10/best.pt - 17.4 hours of pretraining - would have to be redone. An unused token costs
+    one embedding row; a rebuild costs a day. The token is now simply never assigned."""
     top = rel.parts[0]
     if (af := album_folder(top)) is not None:
         return {"album": af[0], "src": af[1]}
     name = slug(top[len("tabs - "):] if top.lower().startswith("tabs - ") else top)
     if name in EARLY:
         return {"src": "early"}
-    return {"genre": name if name in GENRES else GENRE_OTHER}
+    return {"genre": name} if name in GENRES else {}
 
 
 def label_match(labels: dict, spec: str) -> bool:
