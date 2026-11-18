@@ -98,6 +98,25 @@ def main() -> int:
     for d in sorted(DATA.iterdir()):
         if d.is_dir() and d.name.lower().startswith("tabs - "):
             files += [p for p in sorted(d.rglob("*")) if p.suffix.lower() in EXT]
+
+    # Prefilter on the encoded bar counts before parsing anything. The first version gp.parse'd all
+    # 60,227 files single-threaded to find the long ones; it ran 76 minutes without writing a byte and
+    # was killed. The corpus already knows every song's bar count, and that count is REPEAT-EXPANDED, so
+    # nb >= raw measures always holds - which makes nb <= max_bars a sound reason to skip a file
+    # unparsed. Only the few hundred above the threshold are opened, roughly fifty times less work.
+    try:
+        c = riff.Corpus(riff.ROOT / "data_encoded" / "encoded")
+        known = {Path(s["file"]).name: s["nb"] for s in c.songs}
+        before = len(files)
+        # A file the corpus has never seen - the 118 album tracks and 32 silence-split parts written
+        # today, some of which run past 300 bars - has no bar count to filter on, so it must be parsed.
+        files = [p for p in files if known.get(p.name, 10 ** 9) > a.max_bars]
+        print(f"  ({sum(1 for p in files if p.name not in known)} of them are new files with no "
+              f"encoded bar count yet)", flush=True)
+        print(f"prefilter: {before} files -> {len(files)} with encoded bars > {a.max_bars} "
+              f"(nb is repeat-expanded, so it bounds the raw count from above)", flush=True)
+    except Exception as e:
+        print(f"no usable corpus for the prefilter ({e}); parsing everything", flush=True)
     print(f"scanning {len(files)} files for raw measure count > {a.max_bars}", flush=True)
 
     plans, errs = [], 0
