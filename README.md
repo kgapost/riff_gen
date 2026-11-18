@@ -618,6 +618,55 @@ evaluation density, and a larger budget — the first stage B gave every genre
 only ~4.0 passes over its own tokens (`budget × share / T_g`), which is thin
 for adapters starting from zero.
 
+## Genre control: use `--cfg 7`, not the default
+
+The default guidance weight makes the genre label do **nothing**. `riff.py
+infer` defaults to `--cfg 1.5`, and at that weight every genre produces
+byte-identical output. Filling one gap of one song repeatedly — same bars,
+same seed, varying only the genre label — gives this mean pairwise
+divergence over five genres (0 = the label changed nothing):
+
+| song | 1.5 | 5.0 | 7.0 | 10.0 | 14.0 |
+|---|---|---|---|---|---|
+| `cs/black` (doom) | **0.000** | 0.244 | 0.424 | 2.064 | 2.333 |
+| `cs/sentimental sel` | **0.006** | 0.406 | 0.546 | 1.429 | 1.884 |
+| Barrios (classical) | 0.180 | 0.324 | 0.179 | 0.359 | 1.687 |
+| Advent Sorrow (black metal) | **0.003** | 0.108 | 1.192 | 1.397 | 1.747 |
+
+Three of four are inert at the default. From 5 upward the label bites, and
+in musically sensible directions: at `--cfg 7`, against doom holding at
+string 6.13 and palm-mute 0.85, classical moves to string 5.67 / palm-mute
+0.61, jazz to string 5.60, acoustic drops density 21 → 17.
+
+Above 10 it stops being style and becomes damage — classical's density
+jumps to 39.9 notes per bar and the mean log-probability falls from −0.005
+to −0.26, and by 14 jazz has no palm muting at all at −0.60.
+
+**So the usable band is 5–7**, with the honest caveat that the effect size
+varies a lot by context (0.108 to 1.19 at `--cfg 7`) and these cells are
+three candidates each.
+
+This reconciles with [what the training runs found](#what-the-first-full-training-run-found-2026-11-13-to-11-15):
+conditioning on the true genre is worth only 0.0014 in loss, far below the
+0.0036 seed-noise floor, and a genre classifier built from the model scores
+4.6 % against 3.6 % chance. But a signal below the noise floor is still a
+*direction* in logit space, and `cfg_combine` (README §8) multiplies it:
+`L_uncond + w·(L_cond − L_uncond)`. Fine-tuning tried to grow that signal
+across 28 genres and failed; guidance amplifies it at inference, for free.
+
+The label dropout that weakened plain conditioning — every label dropped
+15 % of the time, `riff.py:796` — is the same design decision that makes
+guidance possible, since CFG needs a usable unconditional model.
+
+So for "a doom riff in the style of my CS project":
+
+```
+riff.py infer --song mysong.gp5 --gap 33-40 \
+    --labels genre:doom_stoner_sludge,album:cs --cfg 7
+```
+
+with the `cs` LoRA adapter as `--ckpt` once stage C has run.
+
 ## Pitfalls handled
 
 - Repeats: `repeatClose` counts *extra* passes, and `repeatAlternative` is a
