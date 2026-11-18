@@ -63,8 +63,9 @@ MASK = 0x7FFF
 # after writing a new riff, filling an album folder or adding a genre gives back the same list, so checkpoints
 # stay loadable (train_run exits when --init was trained on another vocabulary). Adding a name here renumbers the
 # label ids and invalidates existing checkpoints, so the lists are written out in full ahead of being filled:
-# every album is registered while its folder is still empty, and GENRE_OTHER absorbs any folder not listed, so a
-# new genre folder costs nothing. Music token ids never depend on any of this - labels go last.
+# every album is registered while its folder is still empty. A folder that is in neither list gets no genre label,
+# so adding one costs nothing until its name is added here. Music token ids never depend on any of this - labels
+# go last.
 EARLY = {"generic", "exercises", "metal_generic"}       # the early years: learned from, steered away from
 ALBUMS = ("vc1", "vc2", "caffeine", "cs", "potha", "tme", "maphorion", "omni", "waves_black", "waves_white",
           "inner", "popper", "hh")
@@ -72,7 +73,11 @@ GENRES = ("acoustic", "blues_soul_rnb", "britpop", "classical", "doom_stoner_slu
           "funk", "funkrock", "grunge", "jazz", "metal_classic", "metal_groove", "metal_melodic_death", "metal_modern",
           "metal_nu", "metal_power", "metal_thrash", "metal_xtreme", "pop", "prog", "punk", "rock", "rock_classic",
           "rock_hard", "shred", "soundtracks")
-GENRE_OTHER = "other"                                   # any genre folder not listed above
+# There is no genre:other. A folder that is in neither GENRES nor EARLY gets no genre label at all
+# (labels_of), and the token is gone from the vocabulary: one embedding shared by every unsorted song
+# taught nothing and was a label a person could condition on by accident. Removing the token renumbers
+# every label id, so checkpoints from before 2026-11-18 cannot be loaded - which is why it waited for a
+# Stage A rerun.
 SOURCES = ("own", "insp", "early")                      # own: mine, the model may copy it. insp: chosen as
 #                                                         inspiration, the model may learn from it but not
 #                                                         reproduce it (configs/plagiarism.yaml tiers)
@@ -107,7 +112,7 @@ DUR_TABLE = {dur_name(v, d, u): (v, d, u) for v in DUR_VALUES for d in (False, T
 def label_tokens() -> list[str]:
     """The whole label vocabulary, from the constants above: the same list whatever a given corpus contains."""
     return [f"lbl:rel:{r}" for r in RELATIONS] + sorted(
-        [f"lbl:album:{a}" for a in ALBUMS] + [f"lbl:genre:{g}" for g in (*GENRES, GENRE_OTHER)] +
+        [f"lbl:album:{a}" for a in ALBUMS] + [f"lbl:genre:{g}" for g in GENRES] +
         [f"lbl:src:{s}" for s in SOURCES])
 
 
@@ -510,10 +515,9 @@ def labels_of(rel: Path) -> dict:
     9,525 unrelated songs taught the model nothing it could use, and it was a label a person could
     accidentally condition on at inference.
 
-    GENRE_OTHER deliberately STAYS in the vocabulary (the token list at Vocab construction is unchanged).
-    Removing it would renumber every label id, and --init refuses a checkpoint whose token list differs,
-    so runs/final10/best.pt - 17.4 hours of pretraining - would have to be redone. An unused token costs
-    one embedding row; a rebuild costs a day. The token is now simply never assigned."""
+    The genre:other TOKEN is gone from the vocabulary too, as of 2026-11-18. That renumbers every label
+    id, so --init refuses any checkpoint from before - runs/final10/best.pt included. It was done together
+    with the Stage A rerun that --label-echo needs anyway, which is the only time it is free."""
     top = rel.parts[0]
     if (af := album_folder(top)) is not None:
         return {"album": af[0], "src": af[1]}
@@ -1384,6 +1388,19 @@ class HierModel(nn.Module):
 MODELS = {
     # flat decoder over a 4,096-token fill-in-the-middle window (~60M)
     "baseline": {"kind": "flat", "d": 640, "layers": 12, "ctx": 4096, "epochs": 4, "micro_tokens": 32768},
+    # The same decoder, wider and deeper. 8 epochs of the 501.5M-token corpus is 4.01B tokens, which is 67
+    # per parameter for baseline against a compute-optimal ~20 - the data supports roughly 200M parameters,
+    # and that is the likeliest reason epoch 8 of the 17.4-hour run bought only 0.0005, under the 0.0036
+    # seed-noise floor: capacity ran out, not data. Measured peak VRAM on the 24GiB card at micro 16384,
+    # from runs/vram_probe.py:
+    #   wide  157M  3.67GiB with activation checkpointing, 16.90GiB WITHOUT - so it can drop --ckpt, which
+    #         is worth about a third of the step time, paying for much of the extra width.
+    #   wider 203M  4.45GiB with checkpointing; without it OOMs, so it must keep --ckpt.
+    # ctx 8192 costs almost nothing in memory (1.88 -> 1.89GiB at baseline) because attention is
+    # memory-linear here, so the context question is about compute and quality, not about fitting.
+    "wide": {"kind": "flat", "d": 896, "layers": 16, "ctx": 4096, "epochs": 8, "micro_tokens": 32768},
+    "wider": {"kind": "flat", "d": 1024, "layers": 16, "ctx": 4096, "epochs": 8, "micro_tokens": 32768,
+              "ckpt": True},
     # bar encoder 4x512 -> global 12x768 over up to 512 (train) / 1,024 (generate) bars -> local 6x512 (~120M)
     "big": {"kind": "hier", "d_enc": 512, "enc_layers": 4, "d_glob": 768, "glob_layers": 12, "d_loc": 512,
             "loc_layers": 6, "max_bars": 512, "epochs": 4, "micro_tokens": 65536, "ckpt": True},
@@ -1686,6 +1703,9 @@ def ex_tokens(ex) -> int:
     return len(ex[0]) if isinstance(ex, tuple) else ex["ntok"]
 
 
+POOL = 8            # micro-batches' worth of flat examples pooled before length bucketing (see Stream)
+
+
 class Stream(torch.utils.data.IterableDataset):
     """Micro-batches built on the fly in the loader workers (README §10, §18): new gaps and augmentations every
     epoch, every example from its own seed (seed, epoch, position), so the data does not depend on the workers."""
@@ -1699,6 +1719,16 @@ class Stream(torch.utils.data.IterableDataset):
         c, epoch = Corpus(self.data), self.epoch
         while True:
             order = epoch_order(c, self.cfg, rng_for(self.seed, epoch), self.focus)
+            # Flat examples are padded to the longest row in their micro-batch (collate_flat -> pad_rows),
+            # and their lengths are wildly uneven: median 3601 tokens but p10 1209, because a song that
+            # fits in the window produces a short example while a long one fills it. Measured on 1,200
+            # real examples at micro=16384, 21.0 % of the padded tensor was padding - a fifth of the GPU
+            # time spent on <pad>. So pool POOL micro-batches' worth and let length_chunks group examples
+            # of similar length, which is what it was written for and what the hierarchical encoder has
+            # always done through enc_chunks. Note length_chunks bounds PADDED tokens by the budget,
+            # where the old loop bounded real tokens, so micro-batches now hold slightly fewer real
+            # tokens and VRAM use becomes predictable rather than a function of the longest row.
+            pool = self.micro * (POOL if self.cfg["kind"] == "flat" else 1)
             buf, n = [], 0
             for k in range(w, len(order), nw):
                 ex = make_example(c, order[k], self.cfg, rng_for(self.seed, epoch, k))
@@ -1706,8 +1736,12 @@ class Stream(torch.utils.data.IterableDataset):
                     continue
                 buf.append(ex)
                 n += ex_tokens(ex)
-                if n >= self.micro:
-                    yield {"batch": collate(buf, c.vocab, self.cfg), "epoch": epoch}
+                if n >= pool:
+                    if self.cfg["kind"] == "flat":
+                        for grp in length_chunks([ex_tokens(e) for e in buf], self.micro):
+                            yield {"batch": collate([buf[i] for i in grp], c.vocab, self.cfg), "epoch": epoch}
+                    else:
+                        yield {"batch": collate(buf, c.vocab, self.cfg), "epoch": epoch}
                     buf, n = [], 0
             epoch += 1
 
@@ -1800,6 +1834,24 @@ def train_run(cfg, data, run, lr, batch_tokens, epochs, eval_every=0.5, budget=N
     groups = [{"params": [p for p in params if p.dim() >= 2], "weight_decay": 0.1},
               {"params": [p for p in params if p.dim() < 2], "weight_decay": 0.0}]
     opt = torch.optim.AdamW(groups, lr=lr, betas=(0.9, 0.95), eps=1e-8, fused=dev.type == "cuda")
+    if cfg.get("compile") and dev.type == "cuda":
+        # dynamic=True on purpose: length bucketing makes the sequence dimension vary from batch to batch,
+        # and a static compile would recompile per shape and lose more than it gains. The optimiser is
+        # built on the parameters above BEFORE this line, which is deliberate - compile wraps the module
+        # but leaves the parameter objects alone, so the groups stay valid and the checkpoint keys stay
+        # unprefixed (state_dict is taken from the original module below, not from the wrapper).
+        # cudagraphs off: with it, inductor raised "Attempting to use a closed pool" on the first step.
+        # CUDA graph pools do not survive this loop - the dataloader workers allocate on the same device
+        # and activation checkpointing re-enters the graph during backward - and graphs buy little here
+        # anyway, since dynamic shapes mean they would be re-captured constantly.
+        # compile_threads = 1 is the fix for "RuntimeError: Attempting to use a closed pool", which
+        # inductor raised on the first step: its async compile pool does not survive alongside the four
+        # forked dataloader workers. Single-threaded compilation is slower to warm up and then identical.
+        # cudagraphs are off for a separate reason - dynamic shapes would have them re-captured constantly.
+        log("torch.compile(dynamic=True, 1 compile thread, cudagraphs off)")
+        torch._inductor.config.compile_threads = 1
+        torch._inductor.config.triton.cudagraphs = False
+        model.forward = torch.compile(model.forward, dynamic=True)
     if resume and (run / "last.pt").is_file():
         ck = torch.load(run / "last.pt", map_location="cpu", weights_only=False)
         model.load_state_dict(ck["model"])
@@ -2779,6 +2831,10 @@ def cmd_train(a) -> None:
         cfg = cfg | {"ckpt": True}
     if a.label_echo:
         cfg = cfg | {"label_echo": True}
+    if a.compile:
+        cfg = cfg | {"compile": True}
+    if a.ctx:
+        cfg = cfg | {"ctx": a.ctx}
     h = suggest(cfg, corpus_stats(a.data), a.epochs)
     train_run(cfg, a.data, a.run or ROOT / "runs" / cfg["name"], a.lr or h["lr"], a.batch_tokens or h["batch_tokens"],
               a.epochs or cfg["epochs"], a.eval_every, a.budget, a.resume, a.init, a.lora, parse_focus(a.focus),
@@ -2996,6 +3052,11 @@ def main(argv=None) -> None:
     p.add_argument("--model", choices=list(MODELS), default="big")
     p.add_argument("--focal", type=float, default=0.0, help="focusing exponent (README §12); 0 is off")
     p.add_argument("--smooth", type=float, default=0.0, help="label smoothing; the Nov 5 grid found it hurts")
+    p.add_argument("--ctx", type=int, default=0,
+                   help="override the model's window in tokens (flat models); 0 keeps the model default")
+    p.add_argument("--compile", action="store_true",
+                   help="torch.compile the forward pass (dynamic=True, since bucketing varies the "
+                        "sequence length); one-off warmup cost, then faster steps")
     p.add_argument("--label-echo", action="store_true",
                    help="repeat the label slots just before <mid>, next to the bars being generated, "
                         "instead of only at position 1-4 of a 4096-token context")
