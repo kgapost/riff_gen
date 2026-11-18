@@ -885,9 +885,22 @@ def choose_context(f, lens, s, L, holes, budget) -> list[int]:
     return sorted(chosen)
 
 
-def flat_example(V, view, rng, ctx, target=None, holes=(), train=True, slots=None, ctx_weight=0.5):
+def flat_example(V, view, rng, ctx, target=None, holes=(), train=True, slots=None, ctx_weight=0.5,
+                 echo=False):
     """Baseline example (README §6): [labels tempo len <pre> before <suf> after <mid> gap bars]. Skipped
-    bars become gap:N. Returns (ids, weights, prompt length) or None."""
+    bars become gap:N. Returns (ids, weights, prompt length) or None.
+
+    ``echo`` repeats the label slots immediately before <mid>, i.e. directly in front of the bars the
+    model has to produce. The labels normally sit at positions 1-4 of a context up to 4096 tokens long,
+    thousands of tokens away from the gap, while the neighbouring bars are far more predictive - so the
+    model learns to answer without them. Measured on runs/final10/best.pt: conditioning on the TRUE genre
+    is worth 0.0014 in loss against a 0.0036 seed-noise floor, and reading the genre back off the model
+    scores 4.6 % against 3.6 % chance. The echo costs four prompt tokens and puts the condition next to
+    the thing it is meant to condition.
+
+    It changes the token sequence, so a model trained with it needs it at inference too; cfg["label_echo"]
+    records that, gen_flat re-points the per-candidate label rows at both copies, and the flag is off by
+    default so existing checkpoints keep working unchanged."""
     nb, f = view.nb, view.f
     holes = set(holes)
     if target is None:
@@ -928,6 +941,9 @@ def flat_example(V, view, rng, ctx, target=None, holes=(), train=True, slots=Non
     ids.append(V.suf)
     wts.append(0.0)
     emit(s + L, nb, ctx_weight if train else 0.0)
+    if echo:                                             # the condition, restated next to the gap
+        ids.extend(slots)
+        wts.extend([0.0] * len(slots))
     ids.append(V.mid)
     wts.append(0.0)
     n_prompt = len(ids)
@@ -1487,11 +1503,17 @@ def choose(logits, writers, w, temp, top_p, gen, lp, nlp):
 
 
 @torch.no_grad()
-def gen_flat(model, V, prompt, rows, w, plans, n_cand, temp, top_p, seed):
+def gen_flat(model, V, prompt, rows, w, plans, n_cand, temp, top_p, seed, echo=False):
     dev = next(model.parameters()).device
     R = len(rows)
     P = torch.tensor(prompt, device=dev).repeat(R, 1)
-    P[:, 1:5] = torch.tensor(rows, device=dev)
+    rw = torch.tensor(rows, device=dev)
+    P[:, 1:5] = rw
+    if echo:
+        # flat_example put a second copy of the slots just before <mid>, which is the last prompt token.
+        # Both copies must carry the candidate's labels or guidance would compare rows that differ in one
+        # place and agree in the other, halving the very signal the echo exists to strengthen.
+        P[:, P.shape[1] - 1 - len(rows[0]):P.shape[1] - 1] = rw
     last, shared = model.prefill(P)
     owns = [{"k": None, "v": None} for _ in shared]
     logits = last[None].expand(n_cand, R, -1).reshape(n_cand * R, -1)
@@ -1612,8 +1634,11 @@ def fill_gap(model, V, cfg, view, target, holes, rows, w, n_cand=8, temp=1.0, to
     dev = next(model.parameters()).device
     wt = torch.tensor(w, dtype=torch.float32, device=dev)
     if cfg["kind"] == "flat":
-        ids, _, n_prompt = flat_example(V, view, rng, cfg["ctx"], target, holes, train=False, slots=rows[0])
-        res = gen_flat(model, V, ids[:n_prompt].tolist(), rows, wt, plans, n_cand, temp, top_p, seed)
+        echo = bool(cfg.get("label_echo"))
+        ids, _, n_prompt = flat_example(V, view, rng, cfg["ctx"], target, holes, train=False, slots=rows[0],
+                                        echo=echo)
+        res = gen_flat(model, V, ids[:n_prompt].tolist(), rows, wt, plans, n_cand, temp, top_p, seed,
+                       echo=echo)
     else:
         ex = hier_example(V, view, rng, cfg.get("max_bars_infer", 2 * cfg["max_bars"]), [target], holes,
                           train=False, slots=rows[0])
@@ -1649,7 +1674,7 @@ def epoch_tokens(c: Corpus, focus) -> float:
 def make_example(c: Corpus, sid, cfg, rng):
     view = c.view(sid)
     if cfg["kind"] == "flat":
-        return flat_example(c.vocab, view, rng, cfg["ctx"])
+        return flat_example(c.vocab, view, rng, cfg["ctx"], echo=bool(cfg.get("label_echo")))
     return hier_example(c.vocab, view, rng, cfg["max_bars"])
 
 
@@ -1928,7 +1953,8 @@ def gap_loss(model, c: Corpus, cfg, gaps, dev) -> dict:
             j, g = item
             view, rng = c.view(g["song"]), rng_for(0, j)
             tgt = (g["start"], g["len"])
-            ex = (flat_example(V, view, rng, cfg["ctx"], tgt, train=False) if cfg["kind"] == "flat" else
+            ex = (flat_example(V, view, rng, cfg["ctx"], tgt, train=False,
+                               echo=bool(cfg.get("label_echo"))) if cfg["kind"] == "flat" else
                   hier_example(V, view, rng, cfg.get("max_bars_infer", 2 * cfg["max_bars"]), [tgt], train=False))
             if ex is not None:
                 buf.append(ex)
@@ -2751,6 +2777,8 @@ def cmd_train(a) -> None:
         cfg = cfg | {"smooth": a.smooth}
     if a.ckpt:
         cfg = cfg | {"ckpt": True}
+    if a.label_echo:
+        cfg = cfg | {"label_echo": True}
     h = suggest(cfg, corpus_stats(a.data), a.epochs)
     train_run(cfg, a.data, a.run or ROOT / "runs" / cfg["name"], a.lr or h["lr"], a.batch_tokens or h["batch_tokens"],
               a.epochs or cfg["epochs"], a.eval_every, a.budget, a.resume, a.init, a.lora, parse_focus(a.focus),
@@ -2968,6 +2996,9 @@ def main(argv=None) -> None:
     p.add_argument("--model", choices=list(MODELS), default="big")
     p.add_argument("--focal", type=float, default=0.0, help="focusing exponent (README §12); 0 is off")
     p.add_argument("--smooth", type=float, default=0.0, help="label smoothing; the Nov 5 grid found it hurts")
+    p.add_argument("--label-echo", action="store_true",
+                   help="repeat the label slots just before <mid>, next to the bars being generated, "
+                        "instead of only at position 1-4 of a 4096-token context")
     p.add_argument("--ckpt", action="store_true",
                    help="recompute the activations instead of storing them: same arithmetic, ~a third slower")
     p.add_argument("--data", default=data)

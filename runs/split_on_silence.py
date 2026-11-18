@@ -111,6 +111,11 @@ def main() -> int:
     ap.add_argument("--review", action="store_true")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--min-silence", type=int, default=2)
+    ap.add_argument("--names", nargs="*",
+                    help="only these files, matched as a substring of the stem. The silence signal is "
+                         "~60%% precise even in its best subset, so the only safe use is a hand-checked "
+                         "list: it proposed cutting up Sleep's Dopesmoker, NOFX's The Decline and Jinjer's "
+                         "Inhale Dont Breathe, all single songs.")
     a = ap.parse_args()
 
     qcsv = riff.ROOT / "runs" / "tab_quality.csv"
@@ -127,6 +132,8 @@ def main() -> int:
             if int(row["bars"]) >= MIN_BARS and (p := ondisk.get(Path(row["file"]).name)):
                 cands.append(p)
     cands = sorted(set(cands))
+    if a.names:
+        cands = [p for p in cands if any(n.lower() in p.stem.lower() for n in a.names)]
     print(f"{len(cands)} candidates, silence run >= {a.min_silence} measures\n", flush=True)
 
     verdicts = collections.Counter()
