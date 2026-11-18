@@ -52,6 +52,15 @@ PLAN = {
     "liquid tension experiment": "tabs - shred",
     "rob scallon": "tabs - acoustic",
     "dance gavin dance": "tabs - metal modern",
+    # third pass: the seven artists the post-cleanup scan found with no clear home genre, i.e. whose
+    # largest folder held under 65 % of their tabs. Each is a judgement call the data cannot make.
+    "mogwai": "tabs - britpop",
+    "khruangbin": "tabs - experimental",
+    "king gizzard the lizard wizard": "tabs - experimental",
+    "santana": "tabs - rock classic",
+    "agalloch": "tabs - metal xtreme",
+    "thy art is murder": "tabs - metal modern",
+    "coroner": "tabs - metal thrash",
 }
 # Folders that start with "tabs - " but are not genres: none of them is in riff.GENRES, so prepare labels
 # their tabs "other" (12,241 files, 20% of the corpus). They are left alone here - "tabs - exercises" holds
